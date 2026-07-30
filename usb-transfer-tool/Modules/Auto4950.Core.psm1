@@ -344,9 +344,13 @@ function New-A4950Archive {
         New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
     }
     $archiveLeaf = Split-Path -Leaf $ArchivePath
+    # Split parts are named "<base>.001" (no format extension) - see splitting
+    # code below - so stale-file matching is done against the extension-less
+    # base name, which also still matches the whole archive itself.
+    $baseLeaf = [System.IO.Path]::GetFileNameWithoutExtension($ArchivePath)
 
     # Remove any stale output from a previous run so volume detection is clean.
-    Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf*" -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $archiveDir -Filter "$baseLeaf.*" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
     # Build 7z argument list.  'a' = add, -mx = level, -t = type.
@@ -409,7 +413,7 @@ function New-A4950Archive {
             if ($split.Cancelled) {
                 $result.Cancelled = $true
                 Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
+                Get-ChildItem -LiteralPath $archiveDir -Filter "$baseLeaf.*" -ErrorAction SilentlyContinue |
                     Remove-Item -Force -ErrorAction SilentlyContinue
                 return $result
             }
@@ -432,10 +436,22 @@ function New-A4950Archive {
         # All produced files are reported via -OnPartReady together, in one
         # batch, only after the process has completed.
         if ($VolumeSizeMB -gt 0) {
-            # With -v, 7-Zip writes <archive>.001, .002, ...
+            # With -v, 7-Zip writes <archive>.<format>.001, .002, ... (e.g.
+            # "case.7z.001") - rename each volume to strip the format
+            # extension so the on-disk name matches our own zip-splitting
+            # convention: "case.001" instead of "case.7z.001".
             $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
-            if ($vols) { $result.Files = @($vols.FullName) }
+            if ($vols) {
+                $renamedPaths = foreach ($v in $vols) {
+                    $suffix  = $v.Name.Substring($archiveLeaf.Length)   # e.g. ".001"
+                    $newName = "$baseLeaf$suffix"
+                    $newPath = Join-Path $archiveDir $newName
+                    Rename-Item -LiteralPath $v.FullName -NewName $newName -Force
+                    $newPath
+                }
+                $result.Files = @($renamedPaths)
+            }
             elseif (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }  # not actually split
         } else {
             if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
@@ -454,9 +470,11 @@ function Split-A4950File {
     .DESCRIPTION
         Used for zip archives, since 7-Zip's -v volume switch does not support
         the zip container format (it silently produces one whole file instead).
-        The parts are plain sequential byte chunks - reassemble by concatenating
-        them in order, e.g. on Windows:
-            copy /b archive.zip.001+archive.zip.002+archive.zip.003 archive.zip
+        The parts are plain sequential byte chunks, named "<base>.001",
+        "<base>.002", ... (the original file's extension is dropped, so a
+        split of "archive.zip" produces "archive.001", "archive.002", ...) -
+        reassemble by concatenating them in order, e.g. on Windows:
+            copy /b archive.001+archive.002+archive.003 archive.zip
         This is the same mechanism 7-Zip's own volumes use internally, so the
         parts are handled identically by the rest of the pipeline (transfer,
         naming, "open the .001" instructions).
@@ -484,13 +502,16 @@ function Split-A4950File {
     $buffer = New-Object byte[] $bufSize
     $partIndex = 0
     $cancelled = $false
+    # Parts drop the original extension, e.g. "archive.zip" -> "archive.001",
+    # not "archive.zip.001".
+    $baseNoExt = [System.IO.Path]::ChangeExtension($Path, $null)
 
     $in = [System.IO.File]::OpenRead($Path)
     try {
         while ($in.Position -lt $in.Length) {
             if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
             $partIndex++
-            $partPath = "{0}.{1:D3}" -f $Path, $partIndex
+            $partPath = "{0}.{1:D3}" -f $baseNoExt, $partIndex
             $partOk = $false
             $out = [System.IO.File]::OpenWrite($partPath)
             try {
@@ -708,7 +729,7 @@ function Get-A4950UniqueName {
     <#
     .SYNOPSIS Build a destination file name that does not already exist, by
               inserting a date/time stamp before the first extension.
-    .EXAMPLE  case__Photos.zip.001  ->  case__Photos_20260727_143000.zip.001
+    .EXAMPLE  case__Photos.001  ->  case__Photos_20260727_143000.001
     #>
     [CmdletBinding()]
     param(

@@ -202,7 +202,8 @@ splits it itself into `.001`/`.002`/… parts (the same raw byte layout 7-Zip's
 own volumes use), so a `zip` job with a split size set actually produces
 volumes instead of one large file. Reassemble either format's volumes by
 opening the `.001` in 7-Zip, or — without 7-Zip — concatenate the parts in
-order: `copy /b file.zip.001+file.zip.002 file.zip`.
+order: `copy /b file.001+file.002 file.zip`. Volume file names drop the
+archive extension (`file.001`, not `file.zip.001`).
 
 **Volumes transfer as soon as each one is ready (zip only).** For `zip`, the
 tool writes `.001`, `.002`, … strictly in order — `.001` is completely closed

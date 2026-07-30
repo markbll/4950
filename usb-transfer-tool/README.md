@@ -116,14 +116,14 @@ everything selected is always combined into ONE archive):
 
 ```
 C:\Destination\CMS-A12345\
-    CMS-A12345.zip.001      (volume 1 – incl. embedded manifest covering everything selected)
-    CMS-A12345.zip.002      (volume 2)
+    CMS-A12345.001      (volume 1 – incl. embedded manifest covering everything selected)
+    CMS-A12345.002      (volume 2)
 ```
 
 > When **split** is off (`VolumeSizeMB = 0`) you get a single file, e.g.
 > `CMS-A12345.zip`. Reassemble volumes by opening the `.001` file in 7-Zip (all
 > parts must be in the same folder) — or, without 7-Zip, concatenate the parts
-> in order: `copy /b CMS-A12345.zip.001+CMS-A12345.zip.002 CMS-A12345.zip`.
+> in order: `copy /b CMS-A12345.001+CMS-A12345.002 CMS-A12345.zip`.
 >
 > 7-Zip's own volume switch only splits its native `.7z` format — it silently
 > ignores splitting for `.zip`. So for `zip` archives, this tool builds the
