@@ -206,11 +206,11 @@ $script:WorkerHandle = $null
             </StackPanel>
           </Grid>
 
-          <TextBlock Grid.Row="2" x:Name="LblNamePreview" Text="File name: (enter a CMS case, OP name or pass number)"
+          <TextBlock Grid.Row="2" x:Name="LblNamePreview" Text="File name: (enter a CMS case or OP name)"
                      Foreground="{StaticResource Muted}" FontStyle="Italic" Margin="0,6,0,0" TextWrapping="Wrap"/>
 
           <CheckBox Grid.Row="3" x:Name="ChkAuto" Margin="0,8,0,0"
-                    Content="Auto-transfer when a USB drive is plugged in (needs CMS case, OP name or pass no.)"/>
+                    Content="Auto-transfer when a USB drive is plugged in (needs CMS case or OP name)"/>
 
           <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,4">
             <TextBlock Text="Source drive:" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -705,8 +705,11 @@ function Set-QuickTransfer {
 }
 
 # ----------------------------------------------------------------------------
-# Transfer identifier: any of CMS case (validated) / OP name (UPPERCASE) / Pass no.
-# The folder + archive names are built from whichever are supplied, joined by '_'.
+# Transfer identifier: CMS case (validated) and/or OP name (UPPERCASE) - one of
+# the two is required. Pass no. is always optional and never satisfies the
+# requirement on its own. The folder + archive names are built from whichever
+# of the three are supplied, joined by '_' (so entering both CMS case and OP
+# name uses both in the name).
 # ----------------------------------------------------------------------------
 function Get-TransferName {
     $case = $ctrl.TxtCase.Text.Trim()
@@ -728,8 +731,8 @@ function Get-TransferName {
     }
 
     if ($errs.Count) { return [pscustomobject]@{ Ok = $false; Name = $null; Kind = ''; Reason = ($errs -join ' ') } }
-    if ($parts.Count -eq 0) {
-        return [pscustomobject]@{ Ok = $false; Name = $null; Kind = ''; Reason = "Enter a CMS case (e.g. $($config.CasePrefix)12345), an OP name (UPPERCASE) or a pass number." }
+    if (-not $caseGiven -and -not $op) {
+        return [pscustomobject]@{ Ok = $false; Name = $null; Kind = ''; Reason = "Enter a CMS case (e.g. $($config.CasePrefix)12345) or an OP name (UPPERCASE). A pass number alone is not enough." }
     }
     return [pscustomobject]@{ Ok = $true; Name = ($parts -join '_'); Kind = ($kinds -join '+'); Reason = '' }
 }
@@ -1258,9 +1261,11 @@ WORKFLOW
   1. Connect a USB drive. It is scanned automatically and its folders/files are
      listed in the middle panel. Tick what to transfer (all by default); use
      "Select All" / "Deselect All" or untick individual items.
-  2. Fill in any of: CMS case (starts with '$($config.CasePrefix)'), OP NAME (UPPERCASE),
-     PASS NUMBER. Whatever you provide is combined into the folder/file name
-     (e.g. $($config.CasePrefix)12345_JBLOGGS_PASS4471). At least one is required.
+  2. Fill in a CMS case (starts with '$($config.CasePrefix)') and/or an OP NAME
+     (UPPERCASE) - at least one of these two is required. PASS NUMBER is
+     always optional. Whatever you provide is combined into the folder/file
+     name (e.g. $($config.CasePrefix)12345_JBLOGGS_PASS4471) - if both CMS case
+     and OP name are entered, both are used.
   3. Press "Start Capture" and confirm the summary (which lists the folders, the
      destination and the zip names).
 
@@ -1298,8 +1303,8 @@ TEMP CLEANUP
 AUTO-TRANSFER
   Tick "Auto-transfer when a USB drive is plugged in". Then, as soon as a drive
   is connected, the capture starts automatically with NO prompts - it only
-  requires that a valid CMS case, OP name or pass number is already entered.
-  If none is set you'll be asked to provide one.
+  requires that a valid CMS case and/or OP name is already entered (a pass
+  number alone is not enough). If neither is set you'll be asked to provide one.
 
 COMBINED ARCHIVE
   All selected folders/files are always packed into ONE combined archive (this

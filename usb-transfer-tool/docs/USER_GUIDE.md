@@ -77,13 +77,16 @@ lost either way).
   it (or capture the whole folder).
 
 ### CMS case number / OP name
-- Provide **either**:
+- Provide **at least one** of:
   - a **CMS case** — must begin with the configured prefix (default **`CMS-A`**)
-    and include an identifier, e.g. `CMS-A12345`; **or**
+    and include an identifier, e.g. `CMS-A12345`; **and/or**
   - an **OP name** — must be **UPPERCASE** (the box forces upper case as you type).
-- If both are filled in, the **CMS case takes precedence**. The chosen value
-  becomes the **destination folder name** and **archive file name prefix**. Each
-  hint highlights until its value is valid.
+- A **pass number** on its own does not satisfy this requirement — it's always
+  optional and only ever adds to the name.
+- If **both** CMS case and OP name are filled in, **both** are used - the
+  destination folder name and archive file name prefix are built from
+  whichever of CMS case, OP name and pass number you supplied, joined
+  together. Each hint highlights until its value is valid.
 
 ### Auto-transfer
 - Tick **"Auto-transfer when a USB drive is plugged in"** to start the capture
@@ -110,8 +113,8 @@ nothing collides. Nothing transfers until that one compression pass finishes.
 
 1. **Connect the USB drive** — it is scanned and its contents listed. With
    prompt-on-insert on (and auto-transfer off) a **Yes/No** dialog appears.
-2. Confirm/adjust the **selection** and enter a **CMS case, OP name or pass
-   number**.
+2. Confirm/adjust the **selection** and enter a **CMS case and/or OP name**
+   (at least one is required), plus an optional **pass number**.
 3. Click **Start Capture**. The tool first runs a **destination free-space
    check** (see below); if that passes, confirm the summary dialog — it lists
    every selected item's full source path, the destination folder and the
