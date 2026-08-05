@@ -31,6 +31,24 @@ $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
+# P/Invoke used solely to enlarge the native Windows folder/file-picker dialogs
+# (System.Windows.Forms.FolderBrowserDialog / OpenFileDialog expose no
+# Width/Height property of their own) - see Show-EnlargedDialog below.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace Auto4950 {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    public static class NativeDialog {
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    }
+}
+'@
+
 Import-Module $coreModule   -Force
 Import-Module $workerModule -Force
 
@@ -133,9 +151,9 @@ $script:WorkerHandle = $null
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="250"/>
-        <ColumnDefinition Width="330"/>
+        <ColumnDefinition Width="1.2*"/>
         <ColumnDefinition x:Name="ColOptions" Width="300"/>
-        <ColumnDefinition Width="1.5*"/>
+        <ColumnDefinition Width="1.2*"/>
       </Grid.ColumnDefinitions>
 
       <!-- Live system stats -->
@@ -215,7 +233,7 @@ $script:WorkerHandle = $null
 
           <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,4">
             <TextBlock Text="Source drive:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-            <ComboBox x:Name="CmbDrive" Width="120" Foreground="#FF202020" VerticalAlignment="Center"/>
+            <ComboBox x:Name="CmbDrive" Width="200" Foreground="#FF202020" VerticalAlignment="Center"/>
             <Button x:Name="BtnDriveRefresh" Content="Refresh Drives"/>
           </StackPanel>
 
@@ -588,7 +606,7 @@ function Add-BrowsedFiles {
     $dlg.Title       = 'Select file(s) to add to the selection'
     $dlg.Multiselect = $true
     $dlg.Filter      = 'All files (*.*)|*.*'
-    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+    if ((Show-EnlargedDialog -Dialog $dlg) -ne [System.Windows.Forms.DialogResult]::OK) { return }
     $added = 0
     $script:SuppressCascade = $true
     try {
@@ -704,13 +722,60 @@ function Save-Options {
 # ----------------------------------------------------------------------------
 # Windows folder/file pickers for locations
 # ----------------------------------------------------------------------------
+function Show-EnlargedDialog {
+    <#
+    .SYNOPSIS Show a System.Windows.Forms common dialog (OpenFileDialog /
+              FolderBrowserDialog) enlarged beyond its default size.
+    .DESCRIPTION
+        Neither dialog exposes a Width/Height property, so there's no direct
+        way to ask for a bigger one. Instead, a short-interval timer polls
+        for the dialog's own top-level window - identified as the foreground
+        window that belongs to our process but ISN'T our main window - right
+        after ShowDialog() opens it, and grows it in place via SetWindowPos.
+        Runs at most once per call; harmless no-op if the window is never
+        matched (e.g. the dialog is closed before the first poll).
+    #>
+    param(
+        [Parameter(Mandatory)] $Dialog,
+        [int]$MinWidth = 1000,
+        [int]$MinHeight = 680
+    )
+    $mainHwnd = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+    $myPid    = [System.Diagnostics.Process]::GetCurrentProcess().Id
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 100
+    $timer.Add_Tick({
+        $hwnd = [Auto4950.NativeDialog]::GetForegroundWindow()
+        if ($hwnd -eq [IntPtr]::Zero -or $hwnd -eq $mainHwnd) { return }
+        $tpid = 0
+        [void][Auto4950.NativeDialog]::GetWindowThreadProcessId($hwnd, [ref]$tpid)
+        if ($tpid -ne $myPid) { return }
+        $rect = New-Object Auto4950.RECT
+        if ([Auto4950.NativeDialog]::GetWindowRect($hwnd, [ref]$rect)) {
+            $w = $rect.Right - $rect.Left
+            $h = $rect.Bottom - $rect.Top
+            if ($w -lt $MinWidth -or $h -lt $MinHeight) {
+                [void][Auto4950.NativeDialog]::SetWindowPos($hwnd, [IntPtr]::Zero, $rect.Left, $rect.Top, [Math]::Max($w, $MinWidth), [Math]::Max($h, $MinHeight), 0x0004)
+            }
+        }
+        $timer.Stop()
+    }.GetNewClosure())
+    $timer.Start()
+    try {
+        return $Dialog.ShowDialog()
+    } finally {
+        $timer.Stop()
+        $timer.Dispose()
+    }
+}
+
 function Select-Folder {
     param([string]$Description, [string]$Start)
     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
     $dlg.Description = $Description
     $dlg.ShowNewFolderButton = $true
     if ($Start -and (Test-Path -LiteralPath $Start)) { $dlg.SelectedPath = $Start }
-    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
+    if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
     return $null
 }
 
@@ -721,7 +786,7 @@ function Select-SevenZipFile {
     foreach ($seed in @("$env:ProgramW6432\7-Zip", "$env:ProgramFiles\7-Zip", "${env:ProgramFiles(x86)}\7-Zip")) {
         if ($seed -and (Test-Path -LiteralPath $seed)) { $dlg.InitialDirectory = $seed; break }
     }
-    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+    if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
     return $null
 }
 
