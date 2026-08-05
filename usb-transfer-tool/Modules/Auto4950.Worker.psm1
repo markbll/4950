@@ -127,20 +127,17 @@ function Invoke-A4950TransferJob {
                         $shaText = if ($srcSha) { "SHA256=$srcSha" } else { 'SHA256=(not calculated - quick transfer)' }
                         Write-A4950WorkerLog $Shared "Transferred: $destName  $shaText  ($whenUtc)" 'OK'
                         # "Confirmed transferred" = copy succeeded AND, if verification was
-                        # requested, the destination hash actually matches. Only then is it
-                        # safe to delete the local temp copy - never on a verify failure.
+                        # requested, the destination hash actually matches.
                         $confirmed = $true
                         if ($cfg.VerifyAfterTransfer) {
                             $d = ''; try { $d = (Get-FileHash -LiteralPath $t.Destination -Algorithm SHA256).Hash } catch {}
                             if ($d -eq $srcSha -and $srcSha) { Write-A4950WorkerLog $Shared "Verified   : $destName (SHA-256 match)" 'OK' }
                             else { Write-A4950WorkerLog $Shared "VERIFY FAIL: $destName (SHA-256 mismatch)" 'ERROR'; $confirmed = $false }
                         }
-                        if ($cfg.DeleteLocalArchive -and $confirmed) {
-                            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-                            Write-A4950WorkerLog $Shared "Temp cleaned: $(Split-Path -Leaf $archive) removed from staging" 'INFO'
-                        } elseif ($cfg.DeleteLocalArchive -and -not $confirmed) {
-                            Write-A4950WorkerLog $Shared "Temp KEPT (verify failed): $(Split-Path -Leaf $archive)" 'WARN'
-                        }
+                        # Local copies are always kept in staging now, regardless of
+                        # outcome - they're only removed via the operator-confirmed
+                        # "Delete Local Copies" button once the destination is verified
+                        # by eye (or manually, from the staging folder).
                         $ResultBag.Add([pscustomobject]@{ Name=$destName; Sha256=$srcSha; SizeBytes=$size; TransferredUtc=$whenUtc; Transferred=$confirmed })
                         Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='xfer'; Action='done'; Name=$name; Ok=$confirmed }
                     } else {
@@ -275,9 +272,12 @@ function Invoke-A4950TransferJob {
         }
 
         # ---------------------------------------------------------------------
-        # Cleanup staging: always on cancel; on a fully-successful job only if
-        # the operator has cleanup enabled (every file confirmed transferred).
-        # A job with any failures/unverified files is left in place for review.
+        # Cleanup staging: always on cancel (an aborted job's partial output
+        # has no evidentiary value). On a completed job, local copies are
+        # ALWAYS kept in $staging - they are only removed by the operator,
+        # either manually or via the confirm-and-delete "Delete Local
+        # Copies" button on the transfer-finished window, after they've
+        # confirmed the files actually reached the destination.
         # ---------------------------------------------------------------------
         if ($cancelled) {
             try {
@@ -286,17 +286,17 @@ function Invoke-A4950TransferJob {
             } catch {}
             Write-A4950WorkerLog $Shared "=== CANCELLED: $ok file(s) already transferred, temp cleaned ===" 'WARN'
         } else {
-            if ($cfg.DeleteLocalArchive -and $ok -gt 0 -and $fail -eq 0) {
-                try {
-                    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-A4950WorkerLog $Shared "All files confirmed transferred - temp area cleaned: $staging" 'OK'
-                } catch { Write-A4950WorkerLog $Shared "Could not fully clean temp area: $($_.Exception.Message)" 'WARN' }
-            } elseif ($fail -gt 0) {
+            if ($fail -gt 0) {
                 Write-A4950WorkerLog $Shared "Temp files kept in $staging ($fail item(s) not confirmed - review before deleting)." 'WARN'
+            } else {
+                Write-A4950WorkerLog $Shared "Local copies kept in $staging - delete manually or via 'Delete Local Copies' once confirmed at the destination." 'INFO'
             }
             Write-A4950WorkerLog $Shared "=== Job complete: $ok transferred, $fail failed ===" ($(if ($fail) {'WARN'} else {'OK'}))
         }
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder }
+        # Staging is included so the GUI's "Delete Local Copies" button knows
+        # what to remove; omitted when cancelled since it's already gone above.
+        $stagingForGui = if ($cancelled) { $null } else { $staging }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui }
     }
     catch {
         Write-A4950WorkerLog $Shared "FATAL: $($_.Exception.Message)" 'ERROR'

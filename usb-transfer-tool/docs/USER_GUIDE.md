@@ -107,7 +107,7 @@ lost either way).
 Everything is editable on the right-hand **Options** panel — destination,
 7-Zip path, staging folder, case prefix, **archive format**, **volume/split
 size (sizing)**, compression level, password, hashing, manifest embedding,
-verification, prompt-on-insert, select-all default, delete-local and exclude
+verification, prompt-on-insert, select-all default and exclude
 patterns. Changes apply immediately when you press **Start**; **Save Options**
 writes them to `config.json`. Every checkbox can be ticked *and* un-ticked.
 
@@ -158,20 +158,20 @@ than typical documents, so treat the suggestion as a guide, not a guarantee.
    appended instead.
 5. If **VerifyAfterTransfer** is on, the archive is **re-hashed at the
    destination** and compared (SHA-256).
-6. Once a file's transfer is **confirmed** (copied, and hash-verified if
-   verification is on), it is deleted from the local staging area straight
-   away — see "Temp cleanup" below.
+6. Local copies are **always kept** in the staging folder after a completed
+   job — see "Temp cleanup" below.
 
 A per-case log is also written to
 `…\StagingFolder\<CASE>\<CASE>.log`.
 
 ### Temp cleanup
-"Delete temp/staged files once confirmed transferred" (on by default) removes
-each local file the moment its transfer is confirmed, and sweeps the whole
-temp job folder once *every* file in the job is confirmed. If a file failed to
-copy, or failed verification, it — and the rest of that job's temp folder — is
-**left in place** for you to review; nothing is ever deleted on an unconfirmed
-or failed transfer.
+There is no auto-delete setting: local copies (the zip/7z file(s), manifest
+and transfer log) stay in the staging folder after a completed job, whether
+every file was confirmed or not. Remove them once you've confirmed the files
+reached their destination — either manually, or with **Delete Local Copies**
+on the transfer-finished window, which prompts you to confirm the destination
+first and cannot be undone. A **cancelled** job is the one exception: its
+partial output has no evidentiary value and is cleaned up automatically.
 
 ### Cancelling
 **Cancel** is immediate: it kills the running 7-Zip/robocopy process within a
@@ -252,8 +252,10 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Auto-transfer | Start automatically on insert; needs a CMS case or OP name |
 | Select all by default | Pre-tick every folder/file |
 | Verify after transfer | Re-hash the archive at the destination |
-| Delete temp/staged files once confirmed transferred | Default **on**. Removes each file once its transfer is confirmed, and the whole temp folder once the job is fully confirmed; failed/unverified items are kept |
 | Exclude patterns | Names to skip (e.g. `System Volume Information`) |
+
+Local copies are always kept in the staging folder (no setting for this) -
+see "Temp cleanup" above for how to remove them.
 
 ---
 

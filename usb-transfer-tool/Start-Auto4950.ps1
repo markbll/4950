@@ -70,6 +70,7 @@ $script:UsbEvents    = [System.Collections.Queue]::Synchronized([System.Collecti
 $script:WorkerPs     = $null
 $script:WorkerRs     = $null
 $script:WorkerHandle = $null
+$script:LastJobStaging = $null   # local staging folder of the last completed job, for "Delete Local Copies"
 
 # ----------------------------------------------------------------------------
 # XAML - user interface definition
@@ -324,7 +325,7 @@ $script:WorkerHandle = $null
               <TextBlock Text="BEHAVIOUR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,4"/>
               <CheckBox x:Name="OptPrompt"     Content="Prompt on USB insert (when auto-transfer is off)"/>
               <CheckBox x:Name="OptSelDefault" Content="Select all folders/files by default"/>
-              <CheckBox x:Name="OptDelete"     Content="Delete temp/staged files once confirmed transferred"/>
+              <TextBlock Text="Local copies (in the staging folder) are always kept until you delete them - manually, or via &quot;Delete Local Copies&quot; on the transfer-finished window." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,4"/>
               <TextBlock Text="Exclude patterns (comma separated)"/>
               <TextBox x:Name="OptExcl"/>
             </StackPanel>
@@ -692,7 +693,6 @@ function Set-OptionsFromConfig {
     $ctrl.OptMd5.IsChecked        = ($config.HashAlgorithms -contains 'MD5')
     $ctrl.OptEmbed.IsChecked      = [bool]$config.EmbedManifest
     $ctrl.OptVerify.IsChecked     = [bool]$config.VerifyAfterTransfer
-    $ctrl.OptDelete.IsChecked     = [bool]$config.DeleteLocalArchive
     $ctrl.OptPrompt.IsChecked     = [bool]$config.AutoPromptOnInsert
     $ctrl.OptSelDefault.IsChecked = [bool]$config.DefaultSelectAll
     $ctrl.ChkAuto.IsChecked       = [bool]$config.AutoTransfer
@@ -714,7 +714,6 @@ function Sync-OptionsToConfig {
     $config.HashAlgorithms      = $algs
     $config.EmbedManifest       = [bool]$ctrl.OptEmbed.IsChecked
     $config.VerifyAfterTransfer = [bool]$ctrl.OptVerify.IsChecked
-    $config.DeleteLocalArchive  = [bool]$ctrl.OptDelete.IsChecked
     $config.AutoPromptOnInsert  = [bool]$ctrl.OptPrompt.IsChecked
     $config.DefaultSelectAll    = [bool]$ctrl.OptSelDefault.IsChecked
     $config.AutoTransfer        = [bool]$ctrl.ChkAuto.IsChecked
@@ -832,7 +831,6 @@ function Set-QuickTransfer {
     $ctrl.OptMd5.IsChecked    = $false
     $ctrl.OptEmbed.IsChecked  = $false   # no manifest -> originals are not hashed
     $ctrl.OptVerify.IsChecked = $false   # no re-hash at destination
-    $ctrl.OptDelete.IsChecked = $false
     Sync-OptionsToConfig
     Update-Footer
     Add-LogLine 'Quick Transfer ON: store (no compression), split @ 250 MB, NO hashing, NO verify - fastest throughput.' 'WARN'
@@ -938,6 +936,7 @@ function Show-ProgressWindow {
                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
     </Border>
     <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+      <Button x:Name="PDelete" Content="Delete Local Copies" Padding="14,7" Margin="4" Background="#FF8E2A2A" Foreground="#FFECECEC" Visibility="Collapsed"/>
       <Button x:Name="PCancel" Content="Cancel Transfer" Padding="14,7" Margin="4" Background="#FF8E2A2A" Foreground="#FFECECEC"/>
       <Button x:Name="PClose"  Content="Close" Padding="14,7" Margin="4" Background="#FF3A3A46" Foreground="#FFECECEC"/>
     </StackPanel>
@@ -959,14 +958,44 @@ function Show-ProgressWindow {
         Count  = (& $g 'PCount')
         Cancel = (& $g 'PCancel')
         Close  = (& $g 'PClose')
+        Delete = (& $g 'PDelete')
     }
     (& $g 'PTitle').Text  = "Transfer in progress - $Name"
     (& $g 'PStatus').Text = "Capturing $Name..."
     (& $g 'PCount').Text  = '0 file(s) transferred'
     (& $g 'PCancel').Add_Click({ Stop-Capture })
     (& $g 'PClose').Add_Click({ Close-ProgressWindow })
+    (& $g 'PDelete').Add_Click({ Remove-LocalCopies -Staging $script:LastJobStaging })
     $pw.Add_Closing({ $script:Prog = $null })
     $pw.Show()
+}
+
+function Remove-LocalCopies {
+    <#
+    .SYNOPSIS Confirm-then-delete the local staging copies for the last completed job.
+    #>
+    param([string]$Staging)
+    if (-not $Staging -or -not (Test-Path -LiteralPath $Staging)) {
+        Add-LogLine 'Nothing to delete - local staging folder not found (already removed?).' 'WARN'
+        return
+    }
+    $confirm = [System.Windows.MessageBox]::Show(
+        "Confirm the transferred file(s) have reached their destination (High Side) " +
+        "before deleting the local copies in:`n`n$Staging`n`nThis cannot be undone. Delete now?",
+        'Confirm delete - local copies', 'YesNo', 'Warning')
+    if ($confirm -ne 'Yes') { Add-LogLine 'Delete Local Copies cancelled by operator.' 'INFO'; return }
+    try {
+        Remove-Item -LiteralPath $Staging -Recurse -Force
+        Add-LogLine "Local copies deleted: $Staging" 'OK'
+        if ($script:Prog -and $script:Prog.Delete) {
+            $script:Prog.Delete.IsEnabled = $false
+            $script:Prog.Delete.Content = 'Deleted'
+        }
+        $script:LastJobStaging = $null
+    } catch {
+        Add-LogLine "Could not delete local copies: $($_.Exception.Message)" 'ERROR'
+        [System.Windows.MessageBox]::Show("Could not delete the local copies:`n$($_.Exception.Message)", 'Delete failed', 'OK', 'Error') | Out-Null
+    }
 }
 
 function Close-ProgressWindow {
@@ -1313,11 +1342,15 @@ $pumpTimer.Add_Tick({
                 else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound }
                 $ctrl.LblStage.Text = 'No job running'; $ctrl.BarJob.IsIndeterminate = $false; $ctrl.BarJob.Value = 0; $ctrl.LblJob.Text = ''
                 $ctrl.BarXfer.IsIndeterminate = $false; $ctrl.BarXfer.Value = 0
+                $script:LastJobStaging = if ($m.Staging) { $m.Staging } else { $null }
                 if ($P) {
                     $P.Status.Text = $endText; $P.Title.Text = 'Transfer finished'
                     $P.Stage.Text = 'Done'; $P.BarJob.IsIndeterminate = $false; $P.BarJob.Value = 0
                     $P.BarXfer.IsIndeterminate = $false; $P.BarXfer.Value = 0
                     $P.Cancel.IsEnabled = $false
+                    if ($script:LastJobStaging) {
+                        $P.Delete.Visibility = 'Visible'; $P.Delete.IsEnabled = $true; $P.Delete.Content = 'Delete Local Copies'
+                    }
                 }
                 Complete-Capture
             }
@@ -1432,12 +1465,13 @@ DESTINATION FREE SPACE
   compressed data (photos/video/zips) shrinks far less than typical documents.
 
 TEMP CLEANUP
-  Once a file's transfer is CONFIRMED (copied, and hash-verified if
-  verification is on), it is deleted from the local staging area immediately.
-  When every file in the job is confirmed, the whole temp job folder is
-  removed. If anything failed or failed verification, nothing is deleted so
-  you can review it. Turn this off in Options ("Delete temp/staged files once
-  confirmed transferred") to always keep the local copies.
+  Local copies (the zip/7z file(s), manifest and transfer log) are ALWAYS
+  kept in the staging folder after a completed job - nothing is deleted
+  automatically. Once you've confirmed the files reached their destination,
+  remove them either manually or with "Delete Local Copies" on the transfer
+  -finished window, which prompts you to confirm first. (A cancelled job's
+  partial output IS still cleaned up automatically, since it has no
+  evidentiary value.)
 
 AUTO-TRANSFER
   Tick "Auto-transfer when a USB drive is plugged in". Then, as soon as a drive

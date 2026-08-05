@@ -46,7 +46,6 @@ function Get-DefaultConfig {
         AutoTransfer        = $false                   # Start automatically on insert if a CMS case / OP name is set
         DefaultSelectAll    = $true                    # Pre-select all folders/files by default
         VerifyAfterTransfer = $true                    # Re-hash the archive at destination
-        DeleteLocalArchive  = $true                    # Remove staged/temp files once confirmed transferred
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
@@ -366,7 +365,7 @@ function New-A4950Archive {
     $szArgs = [System.Collections.Generic.List[string]]::new()
     $szArgs.AddRange([string[]]@('a', "-t$Format", "-mx=$Level", '-y', $ArchivePath))
     foreach ($sp in $SourcePath) { $szArgs.Add($sp) }
-    if ($Format -eq '7z') { $szArgs.Add('-mmt=on') }          # multi-threaded
+    $szArgs.Add('-mmt=on')   # multi-threaded compression - 7-Zip supports this for both zip (deflate) and 7z
     if ($VolumeSizeMB -gt 0 -and -not $splitZipOurselves) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes
     if ($ExtraFiles)      { foreach ($ef in $ExtraFiles) { $szArgs.Add($ef) } }
     if ($Password) {
@@ -702,7 +701,10 @@ function Copy-A4950ToShare {
         $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
         if ($robocopy -and $destName -eq $srcName) {
             # robocopy keeps the same file name; fast path.
-            $rcArgs = @($srcDir, $DestinationFolder, $srcName, '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
+            # /Z = restartable mode - a dropped network connection resumes
+            # from the last checkpoint instead of re-copying the whole file.
+            # /J = unbuffered I/O for large sequential files.
+            $rcArgs = @($srcDir, $DestinationFolder, $srcName, '/Z', '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
             $run = Invoke-A4950Process -FilePath $robocopy.Source -Arguments $rcArgs -CancelCheck $CancelCheck
             $result.ExitCode  = $run.ExitCode
             $result.Cancelled = $run.Cancelled
@@ -1003,12 +1005,19 @@ function Get-A4950SuggestedCompression {
 function New-A4950CaseFolderName {
     <#
     .SYNOPSIS Sanitise a case number into a filesystem-safe name.
+    .DESCRIPTION
+        A trailing "." is a legal filename character but, left in place,
+        collides with the "." that separates the archive extension - e.g. a
+        case number typed as "CMS-A12345." would otherwise produce
+        "CMS-A12345..zip" (double dot). Trimmed here, along with trailing
+        spaces (Windows itself silently drops trailing dots/spaces from
+        names, so this only removes characters that wouldn't survive anyway).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$CaseNumber)
     $invalid = [IO.Path]::GetInvalidFileNameChars() -join ''
     $pattern = "[{0}]" -f [regex]::Escape($invalid)
-    ($CaseNumber -replace $pattern, '_').Trim()
+    ($CaseNumber -replace $pattern, '_').Trim().TrimEnd('.', ' ')
 }
 
 function Test-A4950CaseNumber {

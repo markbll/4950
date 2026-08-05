@@ -12,7 +12,6 @@
   "AutoTransfer": false,
   "DefaultSelectAll": true,
   "VerifyAfterTransfer": true,
-  "DeleteLocalArchive": true,
   "StagingFolder": "C:\\temp",
   "ExcludePatterns": ["System Volume Information", "$RECYCLE.BIN", "Thumbs.db"]
 }

@@ -28,15 +28,15 @@ optional pass number.
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
 | Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
-| Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password |
+| Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password, **multi-threaded** (`-mmt=on`) for both formats |
 | Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file |
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
-| Transfer to a destination | UNC share or local folder; robocopy with Copy-Item fallback |
+| Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Transfer starts as soon as it's ready | For a split `zip`, each volume (`.001`, `.002`, …) begins transferring the instant it's fully written — no need to wait for the rest. `7z` volumes and unsplit archives transfer once the whole file is confirmed complete |
+| Transfer starts as soon as it's ready | For a split `zip`, each volume (`.001`, `.002`, …) begins transferring the instant it's fully written, in parallel with compression of the next volume — no need to wait for the rest. `7z` volumes and unsplit archives transfer once the whole file is confirmed complete |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
-| Temp cleanup on success | Each file is removed from staging once its transfer is **confirmed** (copied, and hash-verified if verification is on); the whole temp job folder is swept at the end once *everything* is confirmed. Nothing is deleted if a file failed or failed verification |
+| Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
 | Failed-transfer log | If some files were already sent, a "FAILED TRANSFER" log (names, hashes, times) is written and sent |
 | Destination space check | Before starting, estimates the source size vs. destination free space; if it looks tight, suggests a compression level/format estimated to fit (or lets you continue/cancel) |
 | Full-screen GUI | The window opens maximised |
@@ -172,10 +172,11 @@ See `config.example.json`. Key settings:
 - **VerifyAfterTransfer** — re-hash the archive at the destination.
 - **AutoTransfer** — start automatically on USB insert (needs a CMS case or OP name).
 - **StagingFolder** — local temp area for archives before transfer, default `C:\temp`.
-- **DeleteLocalArchive** — delete each staged file once its transfer is
-  **confirmed** (default **on**); the whole temp job folder is removed once every
-  file in the job is confirmed. Anything not confirmed (failed copy, failed
-  verification, or a cancelled job) is left in place for review.
+  Local copies are **always kept** here after a completed job - there's no
+  auto-delete setting. Remove them manually, or via **Delete Local Copies** on
+  the transfer-finished window, which prompts you to confirm the files have
+  reached their destination before deleting (a cancelled job's partial output
+  is still cleaned up automatically, since it has no evidentiary value).
 - **Password** — optional AES-256 archive password (prefer setting per-session
   in the Options panel rather than storing in plain text).
 
