@@ -346,7 +346,10 @@ function New-A4950Archive {
     # Split parts are named "<base>.001" (no format extension) - see splitting
     # code below - so stale-file matching is done against the extension-less
     # base name, which also still matches the whole archive itself.
-    $baseLeaf = [System.IO.Path]::GetFileNameWithoutExtension($ArchivePath)
+    # TrimEnd('.') is defensive: a base name ending in a dot (however it got
+    # there) would otherwise leave a stray "..001"/"..zip" double-dot once
+    # the "." separator is appended back for the extension or part number.
+    $baseLeaf = ([System.IO.Path]::GetFileNameWithoutExtension($ArchivePath)).TrimEnd('.')
 
     # Remove any stale output from a previous run so volume detection is clean.
     Get-ChildItem -LiteralPath $archiveDir -Filter "$baseLeaf.*" -ErrorAction SilentlyContinue |
@@ -502,8 +505,9 @@ function Split-A4950File {
     $partIndex = 0
     $cancelled = $false
     # Parts drop the original extension, e.g. "archive.zip" -> "archive.001",
-    # not "archive.zip.001".
-    $baseNoExt = [System.IO.Path]::ChangeExtension($Path, $null)
+    # not "archive.zip.001". TrimEnd('.') is defensive: a base name that
+    # itself ends in a dot would otherwise leave a stray "..001".
+    $baseNoExt = ([System.IO.Path]::ChangeExtension($Path, $null)).TrimEnd('.')
 
     $in = [System.IO.File]::OpenRead($Path)
     try {

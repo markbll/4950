@@ -204,7 +204,9 @@ function Invoke-A4950TransferJob {
 
             if (-not $Shared.Cancel) {
                 # 2) Compress ALL items together into ONE archive. Split into volumes if configured.
-                $archivePath = Join-Path $staging ("{0}.{1}" -f $caseSafe, $cfg.ArchiveFormat)
+                # TrimStart('.') on the format guards against a stray leading dot in
+                # config (e.g. ".zip" instead of "zip") producing a double dot here.
+                $archivePath = Join-Path $staging ("{0}.{1}" -f $caseSafe, $cfg.ArchiveFormat.TrimStart('.'))
                 $splitNote = if ($volMB -gt 0) { " split @ ${volMB} MB" } else { '' }
                 Write-A4950WorkerLog $Shared "Compressing: $($existingItems.Count) item(s) -> $(Split-Path -Leaf $archivePath) (level $($cfg.CompressionLevel)$splitNote)" 'STEP'
                 Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=-1; Name=$caseSafe }
