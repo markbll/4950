@@ -431,16 +431,28 @@ function Add-LogLine {
 # ----------------------------------------------------------------------------
 # Drive + tree population
 # ----------------------------------------------------------------------------
-function Get-RemovableDrives {
-    Get-CimInstance Win32_LogicalDisk -Filter "DriveType=2 OR DriveType=3" -ErrorAction SilentlyContinue |
-        Where-Object { $_.DeviceID } |
-        Sort-Object DeviceID
+function Get-AllDrives {
+    # No DriveType filter - list every drive letter Windows exposes (fixed,
+    # removable, network, CD/DVD, RAM disk, unknown), so nothing is hidden
+    # from the operator. Falls back to Get-PSDrive if WMI/CIM itself is
+    # unavailable, instead of silently returning an empty list either way.
+    try {
+        $disks = @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop | Where-Object { $_.DeviceID } | Sort-Object DeviceID)
+        if ($disks.Count -eq 0) { Add-LogLine 'WMI (Win32_LogicalDisk) returned no drives.' 'WARN' }
+        return $disks
+    } catch {
+        Add-LogLine "Drive detection via WMI failed: $($_.Exception.Message) - falling back to Get-PSDrive." 'WARN'
+        return @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^[A-Za-z]$' } |
+            Sort-Object Name |
+            ForEach-Object { [pscustomobject]@{ DeviceID = "$($_.Name):"; VolumeName = $_.Description } })
+    }
 }
 
 function Update-DriveList {
     param([string]$Prefer)
     $ctrl.CmbDrive.Items.Clear()
-    $drives = Get-RemovableDrives
+    $drives = Get-AllDrives
     foreach ($d in $drives) {
         $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
         [void]$ctrl.CmbDrive.Items.Add($label)
