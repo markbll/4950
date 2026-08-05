@@ -75,6 +75,15 @@ lost either way).
   within them). Everything you tick is combined into **one** archive for the
   job — to capture a specific sub-folder only, untick the parent and drill into
   it (or capture the whole folder).
+- **If the source drive doesn't show up** in the dropdown (or you just want to
+  add items from somewhere else), use the manual pickers below it:
+  - **Browse Folder...** opens the standard Windows folder browser and adds
+    the chosen folder as a new top-level item — its sub-folders and files are
+    included automatically, the same as a drive-scanned folder.
+  - **Add Files...** opens a multi-select file picker and adds the chosen
+    file(s) individually.
+  - Both **add to** the existing selection rather than replacing it, so they
+    can be combined freely with a drive-scanned tree or with each other.
 
 ### CMS case number / OP name
 - Provide **at least one** of:

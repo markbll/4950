@@ -182,6 +182,7 @@ $script:WorkerHandle = $null
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
@@ -218,7 +219,15 @@ $script:WorkerHandle = $null
             <Button x:Name="BtnDriveRefresh" Content="Refresh Drives"/>
           </StackPanel>
 
-          <Grid Grid.Row="5" Margin="0,2,0,2">
+          <StackPanel Grid.Row="5" Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal">
+              <Button x:Name="BtnBrowseFolder" Content="Browse Folder..." Foreground="#FF202020"/>
+              <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="#FF202020"/>
+            </StackPanel>
+            <TextBlock Text="If the drive isn't listed above, use Browse to add a folder (its sub-folders are included automatically) or add individual files." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+          </StackPanel>
+
+          <Grid Grid.Row="6" Margin="0,2,0,2">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Selection:" FontWeight="Bold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
@@ -227,11 +236,11 @@ $script:WorkerHandle = $null
             </StackPanel>
           </Grid>
 
-          <Border Grid.Row="6" Background="#FF20202A" CornerRadius="6" Margin="0,4">
+          <Border Grid.Row="7" Background="#FF20202A" CornerRadius="6" Margin="0,4">
             <TreeView x:Name="TreeItems" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"/>
           </Border>
 
-          <TextBlock Grid.Row="7" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
+          <TextBlock Grid.Row="8" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
         </Grid>
       </Border>
 
@@ -543,6 +552,54 @@ function Update-TreeForDrive {
         Add-LogLine "Could not read drive $root : $($_.Exception.Message)" 'ERROR'
     } finally { $script:SuppressCascade = $false }
     Update-SelectionCount
+}
+
+function Test-TopLevelItemExists {
+    param([string]$FullPath)
+    foreach ($tvi in $ctrl.TreeItems.Items) {
+        if ($tvi -is [System.Windows.Controls.TreeViewItem] -and $tvi.Tag.Path -eq $FullPath) { return $true }
+    }
+    return $false
+}
+
+function Add-BrowsedFolder {
+    # Manual fallback for when the source drive isn't detected/listed above
+    # (or the operator just wants to point at an arbitrary folder): adds the
+    # picked folder as a new top-level, checked tree item. Its sub-folders
+    # are included automatically via the same lazy-load-on-expand mechanism
+    # used for drive-based items, and the whole folder is captured
+    # recursively at capture time exactly like a drive-selected folder.
+    $picked = Select-Folder -Description 'Select a source folder to add (all its sub-folders and files are included)'
+    if (-not $picked) { return }
+    $picked = $picked.TrimEnd('\')
+    if (Test-TopLevelItemExists $picked) { Add-LogLine "Folder already in the selection: $picked" 'WARN'; return }
+    $script:SuppressCascade = $true
+    try {
+        [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $picked -Name (Split-Path -Leaf $picked) -IsFolder $true -Checked $true))
+    } finally { $script:SuppressCascade = $false }
+    Update-SelectionCount
+    Add-LogLine "Folder added to selection: $picked" 'OK'
+}
+
+function Add-BrowsedFiles {
+    # Manual fallback for adding individual files, independent of any
+    # drive/folder selection above.
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title       = 'Select file(s) to add to the selection'
+    $dlg.Multiselect = $true
+    $dlg.Filter      = 'All files (*.*)|*.*'
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+    $added = 0
+    $script:SuppressCascade = $true
+    try {
+        foreach ($f in $dlg.FileNames) {
+            if (Test-TopLevelItemExists $f) { continue }
+            [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $f -Name (Split-Path -Leaf $f) -IsFolder $false -Checked $true))
+            $added++
+        }
+    } finally { $script:SuppressCascade = $false }
+    Update-SelectionCount
+    if ($added -gt 0) { Add-LogLine "$added file(s) added to selection." 'OK' }
 }
 
 function Add-CheckedFromNode {
@@ -1023,7 +1080,8 @@ function Start-Capture {
         if ($items.Count -gt $maxShow) { $shown += "   ... and $($items.Count - $maxShow) more" }
         $archiveNote = "COMBINED into ONE archive - ${caseSafe}.$fmt$splitSuffix`n`nSelected items (full source path):`n$($shown -join "`n")"
         $destPath = Join-Path $config.NetworkShare $caseSafe
-        $srcRootFull = "$(Get-SelectedDriveRoot)\"
+        $driveRoot = Get-SelectedDriveRoot
+        $srcRootFull = if ($driveRoot) { "$driveRoot\" } else { '(manually added items - see full paths below)' }
         $integrity = if ($config.EmbedManifest) {
             "Originals will be hashed ($($config.HashAlgorithms -join ' + '))" +
             $(if ($config.VerifyAfterTransfer) { ' and verified at the destination' } else { ' (no destination verify)' }) + '.'
@@ -1261,6 +1319,10 @@ WORKFLOW
   1. Connect a USB drive. It is scanned automatically and its folders/files are
      listed in the middle panel. Tick what to transfer (all by default); use
      "Select All" / "Deselect All" or untick individual items.
+     If the drive doesn't appear in the "Source drive" list, use
+     "Browse Folder..." to add any folder directly (its sub-folders are
+     included automatically) and/or "Add Files..." to add individual files -
+     both add to whatever is already selected rather than replacing it.
   2. Fill in a CMS case (starts with '$($config.CasePrefix)') and/or an OP NAME
      (UPPERCASE) - at least one of these two is required. PASS NUMBER is
      always optional. Whatever you provide is combined into the folder/file
@@ -1361,6 +1423,8 @@ See README.md and docs\USER_GUIDE.md for full documentation.
 $ctrl.BtnRefresh.Add_Click({ Update-DriveList; Update-TreeForDrive; Add-LogLine 'Drives rescanned.' 'INFO' })
 $ctrl.BtnToggleOptions.Add_Click({ Toggle-OptionsPanel })
 $ctrl.BtnDriveRefresh.Add_Click({ Update-DriveList; Update-TreeForDrive; Add-LogLine 'Drives refreshed.' 'INFO' })
+$ctrl.BtnBrowseFolder.Add_Click({ Add-BrowsedFolder })
+$ctrl.BtnBrowseFiles.Add_Click({ Add-BrowsedFiles })
 $ctrl.BtnHelp.Add_Click({ Show-Help })
 $ctrl.BtnQuick.Add_Click({ Set-QuickTransfer })
 $ctrl.BtnStart.Add_Click({ Start-Capture })
