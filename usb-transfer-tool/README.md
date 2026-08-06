@@ -38,7 +38,7 @@ optional pass number.
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
 | Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
 | Failed-transfer log | If some files were already sent, a "FAILED TRANSFER" log (names, hashes, times) is written and sent |
-| Destination space check | Before starting, estimates the source size vs. destination free space; if it looks tight, suggests a compression level/format estimated to fit (or lets you continue/cancel) |
+| Staging space guide | Before starting, estimates the source size vs. **local staging** free space only (never the destination, to avoid slow-link latency). Non-blocking: a shortfall just logs a warning and the job proceeds automatically |
 | Full-screen GUI | The window opens maximised |
 | Collapsible Options | "Hide Options" in the header collapses the Options panel, giving the Activity Log more room |
 | Real-time events/log | Colour-coded activity log (auto-scrolls) with hashes, file names, dates/times; per-case `.log` file |
@@ -180,22 +180,25 @@ See `config.example.json`. Key settings:
 - **Password** — optional AES-256 archive password (prefer setting per-session
   in the Options panel rather than storing in plain text).
 
-### Destination free-space check
+### Staging space guide
 
 Before a capture starts, the tool sums the size of the selected items and
 compares it against an **estimate** of the compressed size at your current
-settings, then checks that estimate against the free space actually available
-at the destination (works for both UNC shares and local folders). If it looks
-like it won't fit:
+settings, then checks that estimate against the free space available in the
+**local staging folder only**. The destination is deliberately never probed
+here — over a slow link that round-trip just adds delay before the job can
+even start, for a number that's advisory at best.
 
-- **Auto-transfer** just logs a warning and continues — it never prompts.
-- **Manual start** shows a dialog with a suggested format/level expected to fit,
-  and lets you **apply it and continue**, **continue anyway**, or **cancel**.
+This is a **guide, not a gate**: it never blocks and never prompts, in either
+Auto-transfer or a manual start. If it looks tight, a warning is logged and
+the job proceeds automatically regardless — parts stream out to the
+destination as soon as each is written, so staging was never going to need to
+hold the whole archive at once anyway.
 
 The compression estimate is a **planning heuristic only** — real compression is
 entirely data-dependent. Already-compressed media (photos, video, most zip/7z
 files) will shrink far less than the estimate suggests; the number is meant to
-catch an obvious shortfall, not to predict the exact archive size.
+flag an obvious shortfall, not to predict the exact archive size.
 
 ---
 

@@ -980,28 +980,6 @@ function Get-A4950FreeSpace {
     return $result
 }
 
-function Get-A4950SuggestedCompression {
-    <#
-    .SYNOPSIS Find the fastest format/level whose estimated size fits in the free space.
-    .OUTPUTS $null if nothing fits, even at maximum (level 9, 7z) compression.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][int64]$SourceBytes,
-        [Parameter(Mandatory)][int64]$FreeBytes
-    )
-    foreach ($fmt in @('zip', '7z')) {
-        for ($lvl = 0; $lvl -le 9; $lvl++) {
-            $ratio = Get-A4950CompressionRatio -Level $lvl -Format $fmt
-            $est = [int64]($SourceBytes * $ratio * 1.02)   # +2% archive/manifest overhead
-            if ($est -lt $FreeBytes) {
-                return [pscustomobject]@{ Level = $lvl; Format = $fmt; EstimatedBytes = $est }
-            }
-        }
-    }
-    return $null
-}
-
 #endregion
 
 #region ------------------------------------------------------------ Logging & utilities

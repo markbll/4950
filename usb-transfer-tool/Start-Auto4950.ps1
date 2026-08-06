@@ -1026,141 +1026,51 @@ function Toggle-OptionsPanel {
 # ----------------------------------------------------------------------------
 # Start / cancel the capture job
 # ----------------------------------------------------------------------------
+# Local staging space guide (non-blocking - never prompts, never checks the
+# destination). The destination is deliberately NOT probed here: over a slow
+# link that round-trip adds real latency before a job can even start, for a
+# number that's only ever advisory anyway - parts stream out to the
+# destination as soon as each is written, so the job was never going to need
+# the destination to hold the whole archive at once. Local staging is the
+# one place a job can concretely fail to even START (7-Zip can't write more
+# than the drive has room for), but even that is only ever a heads-up: a
+# shortfall is logged and the job proceeds automatically either way.
 # ----------------------------------------------------------------------------
-# Destination free-space pre-flight check
-# ----------------------------------------------------------------------------
-function Show-SpaceWarningDialog {
-    param([string]$Message, [bool]$OfferApply)
-    [xml]$dx = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Destination free space" Height="420" Width="640" WindowStartupLocation="CenterOwner"
-        Background="#FF2A2A33" FontFamily="Segoe UI">
-  <Grid Margin="16">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <TextBlock Grid.Row="0" Text="Destination free space" FontSize="18" FontWeight="Bold" Foreground="#FFFFA726" Margin="0,0,0,8"/>
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <TextBlock x:Name="DMsg" TextWrapping="Wrap" Foreground="#FFECECEC" FontSize="13"/>
-    </ScrollViewer>
-    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-      <Button x:Name="DApply"    Content="Apply Suggested Settings &amp; Continue" Padding="12,7" Margin="4" Background="#FF2E7D32" Foreground="#FFECECEC"/>
-      <Button x:Name="DContinue" Content="Continue Anyway" Padding="12,7" Margin="4" Background="#FFFFA726" Foreground="#FF202020"/>
-      <Button x:Name="DCancel"   Content="Cancel" Padding="12,7" Margin="4" Background="#FF3A3A46" Foreground="#FFECECEC"/>
-    </StackPanel>
-  </Grid>
-</Window>
-"@
-    $dw = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
-    $dw.Owner = $window
-    $g = { param($n) $dw.FindName($n) }
-    (& $g 'DMsg').Text = $Message
-    if (-not $OfferApply) { (& $g 'DApply').Visibility = 'Collapsed' }
-    $script:SpaceDialogResult = 'Cancel'
-    (& $g 'DApply').Add_Click({ $script:SpaceDialogResult = 'Apply'; $dw.Close() })
-    (& $g 'DContinue').Add_Click({ $script:SpaceDialogResult = 'Continue'; $dw.Close() })
-    (& $g 'DCancel').Add_Click({ $script:SpaceDialogResult = 'Cancel'; $dw.Close() })
-    [void]$dw.ShowDialog()
-    return $script:SpaceDialogResult
-}
-
-function Confirm-DestinationSpace {
+function Get-StagingSpaceGuide {
     <#
-    .SYNOPSIS Pre-flight check: estimate source size vs LOCAL STAGING and destination free space.
-    .DESCRIPTION
-        Checks both locations because the combined archive is written to the local
-        staging folder in full before (or while) it transfers - at compression
-        level 0 (store, no compression) it's roughly the same size as the source,
-        so a large capture can just as easily run the staging drive out of room
-        as the destination. Returns @{ Proceed = [bool]; Note = [string] }.
-        In -Silent mode (auto-transfer, which must not prompt) a shortfall is
-        logged as a warning but never blocks. In interactive mode a shortfall
-        offers to apply a suggested format/level estimated to fit BOTH
-        locations, continue anyway, or cancel.
+    .SYNOPSIS Non-blocking estimate: source size vs. local staging free space.
+    .OUTPUTS A note string describing the estimate (for the confirm summary / log).
     #>
-    param([string[]]$Items, [switch]$Silent)
+    param([string[]]$Items)
 
     $prevCursor = $window.Cursor
     $window.Cursor = [System.Windows.Input.Cursors]::Wait
-    Add-LogLine 'Estimating source size for the free-space check...' 'INFO'
+    Add-LogLine 'Estimating source size for the staging space guide...' 'INFO'
     $srcBytes = 0L
     foreach ($it in $Items) { $srcBytes += [int64](Get-A4950PathSizeBytes -Path $it) }
     $window.Cursor = $prevCursor
 
     $stagingPath = Expand-A4950Path $config.StagingFolder
-    $locations = @(
-        [pscustomobject]@{ Name = 'Local staging'; Path = $stagingPath;         Free = (Get-A4950FreeSpace -Path $stagingPath) }
-        [pscustomobject]@{ Name = 'Destination';   Path = $config.NetworkShare; Free = (Get-A4950FreeSpace -Path $config.NetworkShare) }
-    )
+    $free  = Get-A4950FreeSpace -Path $stagingPath
     $ratio = Get-A4950CompressionRatio -Level ([int]$config.CompressionLevel) -Format $config.ArchiveFormat
     $estBytes = [int64]($srcBytes * $ratio * 1.02)
+    $note = "Estimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), $($config.ArchiveFormat) level $($config.CompressionLevel))"
 
-    $known = @($locations | Where-Object { $_.Free.Ok })
-    foreach ($loc in $locations) {
-        if (-not $loc.Free.Ok) { Add-LogLine "Could not determine $($loc.Name.ToLower()) free space ($($loc.Path)): $($loc.Free.Error)." 'WARN' }
-    }
-    $noteLines = @("Estimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), $($config.ArchiveFormat) level $($config.CompressionLevel))")
-    foreach ($loc in $known) { $noteLines += "$($loc.Name) free space".PadRight(24) + ": $(Format-A4950Bytes $loc.Free.FreeBytes)" }
-    $note = $noteLines -join "`n"
-
-    if ($known.Count -eq 0) {
-        Add-LogLine 'Could not determine free space at either location. Proceeding without a space check.' 'WARN'
-        return @{ Proceed = $true; Note = $note }
+    if (-not $free.Ok) {
+        Add-LogLine "Could not determine local staging free space ($stagingPath): $($free.Error). Continuing." 'WARN'
+        return $note
     }
 
-    # Keep a 5% safety margin at each location; the binding constraint is
-    # whichever has the least headroom relative to the estimate.
-    $short = @($known | Where-Object { $estBytes -ge [int64]($_.Free.FreeBytes * 0.95) })
-
-    if ($short.Count -eq 0) {
-        Add-LogLine "Free space check OK: ~$(Format-A4950Bytes $estBytes) estimated fits at $(($known.Name) -join ' and ')." 'OK'
-        return @{ Proceed = $true; Note = $note }
-    }
-
-    $shortNames = ($short.Name) -join ' and '
-    $tightestFree = ($short | Sort-Object { $_.Free.FreeBytes } | Select-Object -First 1).Free.FreeBytes
-    $safeTightest = [int64]($tightestFree * 0.95)
-
-    # Estimate exceeds (or is too close to) free space at one or both locations.
-    if ($Silent) {
-        Add-LogLine "WARNING: $shortNames free space may be insufficient - ~$(Format-A4950Bytes $estBytes) estimated needed. Continuing (auto-transfer, no prompts)." 'WARN'
-        return @{ Proceed = $true; Note = $note }
-    }
-
-    $suggestion = Get-A4950SuggestedCompression -SourceBytes $srcBytes -FreeBytes $safeTightest
-    if ($suggestion) {
-        $msg = "The estimated size may exceed the available free space at $shortNames.`n`n" +
-               "Source data (selected items)                     : $(Format-A4950Bytes $srcBytes)`n" +
-               "Current settings ($($config.ArchiveFormat), level $($config.CompressionLevel)) estimate : $(Format-A4950Bytes $estBytes)`n" +
-               (($known | ForEach-Object { "$($_.Name) free space".PadRight(50) + ": $(Format-A4950Bytes $_.Free.FreeBytes)" }) -join "`n") + "`n`n" +
-               "SUGGESTION: switch to $($suggestion.Format) at compression level $($suggestion.Level) - " +
-               "estimated size ~$(Format-A4950Bytes $suggestion.EstimatedBytes), which should fit at both locations.`n`n" +
-               "These are PLANNING ESTIMATES only, not a guarantee - actual compression depends heavily " +
-               "on the data. Already-compressed files (photos, video, zips) shrink far less than this."
-        $resp = Show-SpaceWarningDialog -Message $msg -OfferApply $true
-        switch ($resp) {
-            'Apply' {
-                foreach ($it in $ctrl.OptFormat.Items) { if ($it.Content -eq $suggestion.Format) { $ctrl.OptFormat.SelectedItem = $it } }
-                $ctrl.OptLevel.Value = $suggestion.Level
-                $ctrl.OptLevelLbl.Text = "Compression level: $($suggestion.Level)"
-                Sync-OptionsToConfig
-                Update-Footer
-                Add-LogLine "Applied suggested settings: $($suggestion.Format) level $($suggestion.Level) (est. $(Format-A4950Bytes $suggestion.EstimatedBytes))." 'OK'
-                return @{ Proceed = $true; Note = "Estimated size to send  : $(Format-A4950Bytes $suggestion.EstimatedBytes)  (adjusted settings: $($suggestion.Format) level $($suggestion.Level))" }
-            }
-            'Continue' { Add-LogLine 'Continuing with current settings despite a possible space shortfall.' 'WARN'; return @{ Proceed = $true; Note = $note } }
-            default    { Add-LogLine 'Capture cancelled at the free-space warning.' 'INFO'; return @{ Proceed = $false } }
-        }
+    $note += "`nLocal staging free space : $(Format-A4950Bytes $free.FreeBytes)"
+    $safeFree = [int64]($free.FreeBytes * 0.95)   # 5% safety margin - advisory only
+    if ($estBytes -ge $safeFree) {
+        Add-LogLine ("Staging space guide: estimated ~$(Format-A4950Bytes $estBytes) may exceed local staging " +
+            "free space ($(Format-A4950Bytes $free.FreeBytes)). Continuing anyway - this is a guide, not a " +
+            "gate, and parts transfer out as soon as each is written.") 'WARN'
     } else {
-        $msg = "The selected data is unlikely to fit at $shortNames even at MAXIMUM compression.`n`n" +
-               "Source data (selected items) : $(Format-A4950Bytes $srcBytes)`n" +
-               (($known | ForEach-Object { "$($_.Name) free space".PadRight(28) + ": $(Format-A4950Bytes $_.Free.FreeBytes)" }) -join "`n") + "`n`n" +
-               "Consider freeing up space, selecting fewer items, or choosing a different staging folder " +
-               "or destination.`n`nThis is a PLANNING ESTIMATE only, not a guarantee."
-        $resp = Show-SpaceWarningDialog -Message $msg -OfferApply $false
-        if ($resp -eq 'Continue') { Add-LogLine 'Continuing despite an estimated space shortfall (no compression setting is expected to fit).' 'WARN'; return @{ Proceed = $true; Note = $note } }
-        Add-LogLine 'Capture cancelled at the free-space warning.' 'INFO'
-        return @{ Proceed = $false }
+        Add-LogLine "Staging space guide OK: ~$(Format-A4950Bytes $estBytes) estimated, $(Format-A4950Bytes $free.FreeBytes) free." 'OK'
     }
+    return $note
 }
 
 function Start-Capture {
@@ -1191,15 +1101,14 @@ function Start-Capture {
 
     $caseSafe = New-A4950CaseFolderName $name
 
-    # Pre-flight: estimate source size vs. destination free space; suggest
-    # a tighter compression setting (interactively) if it looks like it won't fit.
-    $spaceCheck = Confirm-DestinationSpace -Items $items -Silent:$NoConfirm
-    if (-not $spaceCheck.Proceed) { return }
+    # Pre-flight: a non-blocking guide only - local staging space vs. estimated
+    # size. Never checks the destination (slow-link latency for no benefit)
+    # and never stops the job; a shortfall is just logged as a warning.
+    $spaceNote = Get-StagingSpaceGuide -Items $items
 
     if (-not $NoConfirm) {
         # List each selected item's FULL source path, the destination folder and the
-        # single combined archive name. (Re-read $config.ArchiveFormat here - the
-        # space check may have just adjusted it.)
+        # single combined archive name.
         $fmt = $config.ArchiveFormat
         $splitSuffix = if ([int]$config.VolumeSizeMB -gt 0) { ".001, .002, ..." } else { '' }
         $lines = foreach ($it in $items) { "   SOURCE: $it" }
@@ -1219,7 +1128,7 @@ function Start-Capture {
         $msg = @"
 Capture $($items.Count) selected item(s) as '$name' ($($tn.Kind))?
 
-$($spaceCheck.Note)
+$spaceNote
 
 Source (full path) : $srcRootFull
 Destination folder : $destPath
@@ -1477,14 +1386,14 @@ CANCEL
   the share, and a "FAILED TRANSFER" log listing them (with hashes and times)
   is written and sent to the destination.
 
-DESTINATION FREE SPACE
-  Before starting, the tool estimates the source size and the compressed size
-  at your current settings, and checks that against the free space actually
-  available at the destination. If it looks tight, you'll be offered a
-  suggested format/level expected to fit - Apply & Continue, Continue Anyway,
-  or Cancel. (Auto-transfer skips the dialog and just logs a warning, since it
-  must never prompt.) This is a planning ESTIMATE, not a guarantee - already-
-  compressed data (photos/video/zips) shrinks far less than typical documents.
+STAGING SPACE GUIDE
+  Before starting, the tool estimates the source size and logs it against the
+  LOCAL STAGING folder's free space - never the destination, so a slow link
+  never adds delay to starting a job. This is a non-blocking guide, not a
+  gate: if it looks tight, a warning is logged and the job proceeds anyway,
+  automatically, with no prompt. It's a planning ESTIMATE, not a guarantee -
+  already-compressed data (photos/video/zips) shrinks far less than typical
+  documents.
 
 TEMP CLEANUP
   Local copies (the zip/7z file(s), manifest and transfer log) are ALWAYS

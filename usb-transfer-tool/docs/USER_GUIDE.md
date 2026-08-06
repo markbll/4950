@@ -124,26 +124,27 @@ nothing collides. Nothing transfers until that one compression pass finishes.
    prompt-on-insert on (and auto-transfer off) a **Yes/No** dialog appears.
 2. Confirm/adjust the **selection** and enter a **CMS case and/or OP name**
    (at least one is required), plus an optional **pass number**.
-3. Click **Start Capture**. The tool first runs a **destination free-space
-   check** (see below); if that passes, confirm the summary dialog — it lists
-   every selected item's full source path, the destination folder and the
-   resulting archive names. (Both the space check and this dialog are skipped
-   under auto-transfer, which never prompts.)
+3. Click **Start Capture**. The tool logs a **staging space guide** (see
+   below) and, unless auto-transfer is on, shows a confirm summary dialog
+   listing every selected item's full source path, the destination folder and
+   the resulting archive names.
 4. A **"Transfer in progress"** window opens, mirroring the activity log and
    showing compress/transfer progress and a running transferred-file count.
 5. Watch the **activity log**:
    - `STEP` (blue) = stage boundaries, `OK` (green) = success,
      `WARN` (amber), `ERROR` (red).
 
-### Destination free-space check
-Before the job starts, the tool sums the size of your selected items and
-estimates the compressed size at your current settings, then compares that to
-the free space actually available at the destination (UNC share or local
-folder). If it looks like it won't fit, a dialog offers a suggested
-format/compression level expected to fit — **Apply Suggested Settings &
-Continue**, **Continue Anyway**, or **Cancel**. This is a **planning estimate
-only**: already-compressed data (photos, video, zip/7z files) shrinks far less
-than typical documents, so treat the suggestion as a guide, not a guarantee.
+### Staging space guide
+Before the job starts, the tool sums the size of your selected items,
+estimates the compressed size at your current settings, and logs that against
+the free space in the **local staging folder only** — the destination is
+never checked here, so a slow link never adds delay before a job can start.
+This is a **guide, not a gate**: it never prompts and never blocks, under
+auto-transfer or a manual start alike. If it looks tight, a warning is logged
+and the job proceeds automatically regardless, since parts stream out to the
+destination as soon as each is written rather than needing to fit all at
+once. It's a **planning estimate only**: already-compressed data (photos,
+video, zip/7z files) shrinks far less than typical documents.
 
 ### What happens internally
 1. **Hash** every original file across your whole selection → one manifest
