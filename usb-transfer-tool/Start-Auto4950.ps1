@@ -1065,53 +1065,75 @@ function Show-SpaceWarningDialog {
 
 function Confirm-DestinationSpace {
     <#
-    .SYNOPSIS Pre-flight check: estimate source size vs destination free space.
+    .SYNOPSIS Pre-flight check: estimate source size vs LOCAL STAGING and destination free space.
     .DESCRIPTION
-        Returns @{ Proceed = [bool]; Note = [string] }. In -Silent mode (used for
-        auto-transfer, which must not prompt) a shortfall is logged as a warning
-        but never blocks. In interactive mode a shortfall offers to apply a
-        suggested format/level that is estimated to fit, continue anyway, or cancel.
+        Checks both locations because the combined archive is written to the local
+        staging folder in full before (or while) it transfers - at compression
+        level 0 (store, no compression) it's roughly the same size as the source,
+        so a large capture can just as easily run the staging drive out of room
+        as the destination. Returns @{ Proceed = [bool]; Note = [string] }.
+        In -Silent mode (auto-transfer, which must not prompt) a shortfall is
+        logged as a warning but never blocks. In interactive mode a shortfall
+        offers to apply a suggested format/level estimated to fit BOTH
+        locations, continue anyway, or cancel.
     #>
     param([string[]]$Items, [switch]$Silent)
 
     $prevCursor = $window.Cursor
     $window.Cursor = [System.Windows.Input.Cursors]::Wait
-    Add-LogLine 'Estimating source size for the destination free-space check...' 'INFO'
+    Add-LogLine 'Estimating source size for the free-space check...' 'INFO'
     $srcBytes = 0L
     foreach ($it in $Items) { $srcBytes += [int64](Get-A4950PathSizeBytes -Path $it) }
     $window.Cursor = $prevCursor
 
-    $free = Get-A4950FreeSpace -Path $config.NetworkShare
+    $stagingPath = Expand-A4950Path $config.StagingFolder
+    $locations = @(
+        [pscustomobject]@{ Name = 'Local staging'; Path = $stagingPath;         Free = (Get-A4950FreeSpace -Path $stagingPath) }
+        [pscustomobject]@{ Name = 'Destination';   Path = $config.NetworkShare; Free = (Get-A4950FreeSpace -Path $config.NetworkShare) }
+    )
     $ratio = Get-A4950CompressionRatio -Level ([int]$config.CompressionLevel) -Format $config.ArchiveFormat
     $estBytes = [int64]($srcBytes * $ratio * 1.02)
 
-    if (-not $free.Ok) {
-        Add-LogLine "Could not determine destination free space: $($free.Error). Proceeding without a space check." 'WARN'
-        return @{ Proceed = $true; Note = "Destination free space: unknown (could not query destination)`nEstimated size to send: $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes))" }
+    $known = @($locations | Where-Object { $_.Free.Ok })
+    foreach ($loc in $locations) {
+        if (-not $loc.Free.Ok) { Add-LogLine "Could not determine $($loc.Name.ToLower()) free space ($($loc.Path)): $($loc.Free.Error)." 'WARN' }
     }
+    $noteLines = @("Estimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), $($config.ArchiveFormat) level $($config.CompressionLevel))")
+    foreach ($loc in $known) { $noteLines += "$($loc.Name) free space".PadRight(24) + ": $(Format-A4950Bytes $loc.Free.FreeBytes)" }
+    $note = $noteLines -join "`n"
 
-    $safeFree = [int64]($free.FreeBytes * 0.95)   # keep a 5% safety margin
-    $note = "Destination free space : $(Format-A4950Bytes $free.FreeBytes)`nEstimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), $($config.ArchiveFormat) level $($config.CompressionLevel))"
-
-    if ($estBytes -lt $safeFree) {
-        Add-LogLine "Free space check OK: $(Format-A4950Bytes $free.FreeBytes) free, ~$(Format-A4950Bytes $estBytes) estimated." 'OK'
+    if ($known.Count -eq 0) {
+        Add-LogLine 'Could not determine free space at either location. Proceeding without a space check.' 'WARN'
         return @{ Proceed = $true; Note = $note }
     }
 
-    # Estimate exceeds (or is too close to) the free space.
+    # Keep a 5% safety margin at each location; the binding constraint is
+    # whichever has the least headroom relative to the estimate.
+    $short = @($known | Where-Object { $estBytes -ge [int64]($_.Free.FreeBytes * 0.95) })
+
+    if ($short.Count -eq 0) {
+        Add-LogLine "Free space check OK: ~$(Format-A4950Bytes $estBytes) estimated fits at $(($known.Name) -join ' and ')." 'OK'
+        return @{ Proceed = $true; Note = $note }
+    }
+
+    $shortNames = ($short.Name) -join ' and '
+    $tightestFree = ($short | Sort-Object { $_.Free.FreeBytes } | Select-Object -First 1).Free.FreeBytes
+    $safeTightest = [int64]($tightestFree * 0.95)
+
+    # Estimate exceeds (or is too close to) free space at one or both locations.
     if ($Silent) {
-        Add-LogLine "WARNING: destination free space may be insufficient - $(Format-A4950Bytes $free.FreeBytes) free, ~$(Format-A4950Bytes $estBytes) estimated needed. Continuing (auto-transfer, no prompts)." 'WARN'
+        Add-LogLine "WARNING: $shortNames free space may be insufficient - ~$(Format-A4950Bytes $estBytes) estimated needed. Continuing (auto-transfer, no prompts)." 'WARN'
         return @{ Proceed = $true; Note = $note }
     }
 
-    $suggestion = Get-A4950SuggestedCompression -SourceBytes $srcBytes -FreeBytes $safeFree
+    $suggestion = Get-A4950SuggestedCompression -SourceBytes $srcBytes -FreeBytes $safeTightest
     if ($suggestion) {
-        $msg = "The estimated compressed size may exceed the available free space at the destination.`n`n" +
+        $msg = "The estimated size may exceed the available free space at $shortNames.`n`n" +
                "Source data (selected items)                     : $(Format-A4950Bytes $srcBytes)`n" +
                "Current settings ($($config.ArchiveFormat), level $($config.CompressionLevel)) estimate : $(Format-A4950Bytes $estBytes)`n" +
-               "Free space at destination                        : $(Format-A4950Bytes $free.FreeBytes)`n`n" +
+               (($known | ForEach-Object { "$($_.Name) free space".PadRight(50) + ": $(Format-A4950Bytes $_.Free.FreeBytes)" }) -join "`n") + "`n`n" +
                "SUGGESTION: switch to $($suggestion.Format) at compression level $($suggestion.Level) - " +
-               "estimated size ~$(Format-A4950Bytes $suggestion.EstimatedBytes), which should fit.`n`n" +
+               "estimated size ~$(Format-A4950Bytes $suggestion.EstimatedBytes), which should fit at both locations.`n`n" +
                "These are PLANNING ESTIMATES only, not a guarantee - actual compression depends heavily " +
                "on the data. Already-compressed files (photos, video, zips) shrink far less than this."
         $resp = Show-SpaceWarningDialog -Message $msg -OfferApply $true
@@ -1123,17 +1145,17 @@ function Confirm-DestinationSpace {
                 Sync-OptionsToConfig
                 Update-Footer
                 Add-LogLine "Applied suggested settings: $($suggestion.Format) level $($suggestion.Level) (est. $(Format-A4950Bytes $suggestion.EstimatedBytes))." 'OK'
-                return @{ Proceed = $true; Note = "Destination free space : $(Format-A4950Bytes $free.FreeBytes)`nEstimated size to send  : $(Format-A4950Bytes $suggestion.EstimatedBytes)  (adjusted settings: $($suggestion.Format) level $($suggestion.Level))" }
+                return @{ Proceed = $true; Note = "Estimated size to send  : $(Format-A4950Bytes $suggestion.EstimatedBytes)  (adjusted settings: $($suggestion.Format) level $($suggestion.Level))" }
             }
             'Continue' { Add-LogLine 'Continuing with current settings despite a possible space shortfall.' 'WARN'; return @{ Proceed = $true; Note = $note } }
             default    { Add-LogLine 'Capture cancelled at the free-space warning.' 'INFO'; return @{ Proceed = $false } }
         }
     } else {
-        $msg = "The selected data is unlikely to fit at the destination even at MAXIMUM compression.`n`n" +
+        $msg = "The selected data is unlikely to fit at $shortNames even at MAXIMUM compression.`n`n" +
                "Source data (selected items) : $(Format-A4950Bytes $srcBytes)`n" +
-               "Free space at destination    : $(Format-A4950Bytes $free.FreeBytes)`n`n" +
-               "Consider freeing up space at the destination, selecting fewer items, or choosing a " +
-               "different destination.`n`nThis is a PLANNING ESTIMATE only, not a guarantee."
+               (($known | ForEach-Object { "$($_.Name) free space".PadRight(28) + ": $(Format-A4950Bytes $_.Free.FreeBytes)" }) -join "`n") + "`n`n" +
+               "Consider freeing up space, selecting fewer items, or choosing a different staging folder " +
+               "or destination.`n`nThis is a PLANNING ESTIMATE only, not a guarantee."
         $resp = Show-SpaceWarningDialog -Message $msg -OfferApply $false
         if ($resp -eq 'Continue') { Add-LogLine 'Continuing despite an estimated space shortfall (no compression setting is expected to fit).' 'WARN'; return @{ Proceed = $true; Note = $note } }
         Add-LogLine 'Capture cancelled at the free-space warning.' 'INFO'
