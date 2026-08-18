@@ -615,11 +615,18 @@ function New-A4950Manifest {
         if ($OnProgress) { & $OnProgress $i $total $f.FullName }
         $h = Get-A4950FileHashes -Path $f.FullName -Algorithms $Algorithms
         $rel = $f.FullName
-        if ($f.FullName.Length -gt $e.Root.Length -and $f.FullName.StartsWith($e.Root)) {
+        if ($f.FullName -eq $e.Root) {
+            # The selected item IS this file (a standalone file was ticked,
+            # not a folder) - nothing to append beyond its own name.
+            $rel = ''
+        } elseif ($f.FullName.Length -gt $e.Root.Length -and $f.FullName.StartsWith($e.Root)) {
             $rel = $f.FullName.Substring($e.Root.Length).TrimStart('\', '/')
         }
         if ([string]::IsNullOrWhiteSpace($rel)) { $rel = $f.Name }
-        if ($multi) { $rel = "$($e.Label)\$rel" }   # disambiguate across combined top-level items
+        # Disambiguate across combined top-level items - but not when $rel is
+        # already just the label (a standalone file), which would otherwise
+        # duplicate it, e.g. "IMG_001.jpg\IMG_001.jpg".
+        if ($multi -and $rel -ne $e.Label) { $rel = "$($e.Label)\$rel" }
         $rec = [ordered]@{
             RelativePath = $rel
             SizeBytes    = $f.Length
