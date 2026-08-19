@@ -1115,8 +1115,8 @@ function Start-Capture {
         $maxShow = 15
         $shown = @($lines | Select-Object -First $maxShow)
         if ($items.Count -gt $maxShow) { $shown += "   ... and $($items.Count - $maxShow) more" }
-        $archiveNote = "COMBINED into ONE archive - ${caseSafe}.$fmt$splitSuffix`n`nSelected items (full source path):`n$($shown -join "`n")"
-        $destPath = Join-Path $config.NetworkShare $caseSafe
+        $archiveNote = "COMBINED into ONE archive - ${caseSafe}_<timestamp>.$fmt$splitSuffix (unique name, no destination sub-folder)`n`nSelected items (full source path):`n$($shown -join "`n")"
+        $destPath = $config.NetworkShare
         $driveRoot = Get-SelectedDriveRoot
         $srcRootFull = if ($driveRoot) { "$driveRoot\" } else { '(manually added items - see full paths below)' }
         $integrity = if ($config.EmbedManifest) {
@@ -1440,11 +1440,13 @@ WHAT HAPPENS
   - Optionally the transferred archive is re-hashed at the destination to verify.
 
 NAMING
-  Destination folder and the archive are named from the CMS case, OP name or
-  pass number:
-    <share>\$($config.CasePrefix)12345\$($config.CasePrefix)12345.$($config.ArchiveFormat)
+  Files land directly in the destination - NO per-case sub-folder. The
+  archive name is built from the CMS case and/or OP name, plus pass number if
+  given, plus this job's own timestamp, so two jobs never collide there:
+    <share>\$($config.CasePrefix)12345_20260818_143000.$($config.ArchiveFormat)
   When split, volumes are suffixed .001, .002, ... (open the .001 in 7-Zip to
-  reassemble; keep all parts together).
+  reassemble; keep all parts together). The manifest and transfer log sent to
+  the destination use the same unique name.
 
 SYSTEM MONITOR
   Live CPU, memory, network throughput and temp-folder free space.

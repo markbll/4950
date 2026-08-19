@@ -115,18 +115,22 @@ All options — including **sizing/volume split** — live in the **Options** pa
 the main screen; **Save Options** persists them.
 
 Output at the destination (default: `zip` format, split into 2 GB volumes;
-everything selected is always combined into ONE archive):
+everything selected is always combined into ONE archive). Files land
+**directly in the destination — no per-case sub-folder** — so the name itself
+carries the CMS case and/or OP name, pass number if given, and this job's
+timestamp, keeping every job's files unique there:
 
 ```
-C:\Destination\CMS-A12345\
-    CMS-A12345.001      (volume 1 – incl. embedded manifest covering everything selected)
-    CMS-A12345.002      (volume 2)
+C:\Destination\
+    CMS-A12345_20260818_143000.001      (volume 1 – incl. embedded manifest covering everything selected)
+    CMS-A12345_20260818_143000.002      (volume 2)
 ```
 
 > When **split** is off (`VolumeSizeMB = 0`) you get a single file, e.g.
-> `CMS-A12345.zip`. Reassemble volumes by opening the `.001` file in 7-Zip (all
-> parts must be in the same folder) — or, without 7-Zip, concatenate the parts
-> in order: `copy /b CMS-A12345.001+CMS-A12345.002 CMS-A12345.zip`.
+> `CMS-A12345_20260818_143000.zip`. Reassemble volumes by opening the `.001`
+> file in 7-Zip (all parts must be in the same folder) — or, without 7-Zip,
+> concatenate the parts in order:
+> `copy /b CMS-A12345_20260818_143000.001+CMS-A12345_20260818_143000.002 CMS-A12345_20260818_143000.zip`.
 >
 > 7-Zip's own volume switch only splits its native `.7z` format — it silently
 > ignores splitting for `.zip`. So for `zip` archives, this tool builds the
@@ -134,9 +138,11 @@ C:\Destination\CMS-A12345\
 > (the same raw sequential-byte layout 7-Zip's own volumes use), so the split
 > size setting works for **both** archive formats.
 
-The archive embeds `CMS-A12345_MANIFEST.txt` and `.csv` listing every original
-file's size, timestamp and SHA-256 / MD5 hash, with each entry prefixed by its
-original top-level folder name (e.g. `Photos\IMG001.jpg`).
+The archive embeds `CMS-A12345_20260818_143000_MANIFEST.txt` and `.csv`
+listing every original file's size, timestamp and SHA-256 / MD5 hash, with
+each entry prefixed by its original top-level folder name (e.g.
+`Photos\IMG001.jpg`) — or left unprefixed if that item was an individually
+selected file rather than a folder.
 
 ---
 

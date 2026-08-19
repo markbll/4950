@@ -93,9 +93,10 @@ lost either way).
 - A **pass number** on its own does not satisfy this requirement — it's always
   optional and only ever adds to the name.
 - If **both** CMS case and OP name are filled in, **both** are used - the
-  destination folder name and archive file name prefix are built from
-  whichever of CMS case, OP name and pass number you supplied, joined
-  together. Each hint highlights until its value is valid.
+  archive file name prefix is built from whichever of CMS case, OP name and
+  pass number you supplied, joined together, plus the job's own timestamp.
+  There is no destination sub-folder - see "Destination naming" below. Each
+  hint highlights until its value is valid.
 
 ### Auto-transfer
 - Tick **"Auto-transfer when a USB drive is plugged in"** to start the capture
@@ -115,6 +116,14 @@ writes them to `config.json`. Every checkbox can be ticked *and* un-ticked.
 **single** archive (this is fixed behavior, not a setting): one shared
 manifest lists every file, prefixed with its original top-level folder name so
 nothing collides. Nothing transfers until that one compression pass finishes.
+
+**Destination naming** — files land **directly in the destination**, with no
+per-case sub-folder (this is fixed behavior, not a setting). Uniqueness comes
+entirely from the file name: CMS case and/or OP name, pass number if given,
+and this job's own timestamp, e.g. `CMS-A12345_JBLOGGS_20260818_143000.zip`.
+The embedded manifest and the transfer log sent to the destination share the
+same name. This keeps repeated jobs - even with the same case/OP/pass - from
+ever colliding at the destination, without needing a folder per case.
 
 ---
 

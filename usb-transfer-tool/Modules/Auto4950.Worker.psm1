@@ -61,12 +61,21 @@ function Invoke-A4950TransferJob {
     $items      = @($Shared.Items)
     $sevenZip   = Resolve-SevenZip -PreferredPath $cfg.SevenZipPath
     $staging    = Join-Path (Expand-A4950Path $cfg.StagingFolder) $caseSafe
-    $destFolder = Join-Path $cfg.NetworkShare $caseSafe
+    # Destination is FLAT - no per-case sub-folder. Every job's files land
+    # directly in NetworkShare, so the archive/manifest/log NAMES themselves
+    # (uniqueBase below) are what keeps different jobs from colliding there,
+    # not folder isolation.
+    $destFolder = $cfg.NetworkShare
 
     # Cancel probe reused by 7-Zip and robocopy so both can be killed instantly.
     $cancel = ({ [bool]$Shared.Cancel }).GetNewClosure()
-    # Job-wide stamp used to de-dupe destination names that already exist.
+    # Job-wide stamp: also de-dupes a destination name that already exists.
     $Shared.Stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    # CMS case and/or OP name, plus pass number if given (Get-TransferName
+    # already built $case from whichever of those were supplied), plus this
+    # job's timestamp - used for every file name that reaches the flat
+    # destination, so two jobs never produce the same file name there.
+    $uniqueBase = "${caseSafe}_$($Shared.Stamp)"
 
     try {
         Write-A4950WorkerLog $Shared "=== Job started for $case ===" 'STEP'
@@ -185,7 +194,7 @@ function Invoke-A4950TransferJob {
             Write-A4950WorkerLog $Shared "--- Combining $($existingItems.Count) selected item(s) into one archive ---" 'STEP'
 
             # 1) Hash ALL originals -> one manifest covering every selected item
-            $manifestPath = Join-Path $staging ("{0}_MANIFEST.txt" -f $caseSafe)
+            $manifestPath = Join-Path $staging ("{0}_MANIFEST.txt" -f $uniqueBase)
             $extraFiles = @()
             if ($cfg.EmbedManifest) {
                 Write-A4950WorkerLog $Shared "Hashing originals ($($cfg.HashAlgorithms -join ', '))..."
@@ -206,7 +215,7 @@ function Invoke-A4950TransferJob {
                 # 2) Compress ALL items together into ONE archive. Split into volumes if configured.
                 # TrimStart('.') on the format guards against a stray leading dot in
                 # config (e.g. ".zip" instead of "zip") producing a double dot here.
-                $archivePath = Join-Path $staging ("{0}.{1}" -f $caseSafe, $cfg.ArchiveFormat.TrimStart('.'))
+                $archivePath = Join-Path $staging ("{0}.{1}" -f $uniqueBase, $cfg.ArchiveFormat.TrimStart('.'))
                 $splitNote = if ($volMB -gt 0) { " split @ ${volMB} MB" } else { '' }
                 Write-A4950WorkerLog $Shared "Compressing: $($existingItems.Count) item(s) -> $(Split-Path -Leaf $archivePath) (level $($cfg.CompressionLevel)$splitNote)" 'STEP'
                 Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=-1; Name=$caseSafe }
@@ -263,7 +272,7 @@ function Invoke-A4950TransferJob {
         # ---------------------------------------------------------------------
         if ($ok -gt 0) {
             $isFailed = $cancelled -or ($fail -gt 0)
-            $logName  = if ($isFailed) { "${caseSafe}_FAILED_TRANSFER.log" } else { "${caseSafe}_TRANSFER.log" }
+            $logName  = if ($isFailed) { "${uniqueBase}_FAILED_TRANSFER.log" } else { "${uniqueBase}_TRANSFER.log" }
             $logPath  = Join-Path $staging $logName
             try {
                 Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed | Out-Null
