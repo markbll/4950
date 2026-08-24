@@ -33,7 +33,12 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 
 # P/Invoke used solely to enlarge the native Windows folder/file-picker dialogs
 # (System.Windows.Forms.FolderBrowserDialog / OpenFileDialog expose no
-# Width/Height property of their own) - see Show-EnlargedDialog below.
+# Width/Height property of their own) - see Show-EnlargedDialog below. Also
+# defines the COM shell interfaces behind the native multi-select FOLDER
+# picker (IFileOpenDialog with FOS_PICKFOLDERS|FOS_ALLOWMULTISELECT) - see
+# Select-MultipleFolders below. Standard shobjidl.idl vtable layout; every
+# method must stay declared in its exact original order even if unused here,
+# since COM interop dispatches by vtable slot position, not by name.
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -46,6 +51,100 @@ namespace Auto4950 {
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     }
+
+    [Flags]
+    public enum FOS : uint {
+        FOS_OVERWRITEPROMPT = 0x2, FOS_STRICTFILETYPES = 0x4, FOS_NOCHANGEDIR = 0x8,
+        FOS_PICKFOLDERS = 0x20, FOS_FORCEFILESYSTEM = 0x40, FOS_ALLNONSTORAGEITEMS = 0x80,
+        FOS_NOVALIDATE = 0x100, FOS_ALLOWMULTISELECT = 0x200, FOS_PATHMUSTEXIST = 0x800,
+        FOS_FILEMUSTEXIST = 0x1000, FOS_CREATEPROMPT = 0x2000, FOS_SHAREAWARE = 0x4000,
+        FOS_NOREADONLYRETURN = 0x8000, FOS_NOTESTFILECREATE = 0x10000, FOS_HIDEMRUPLACES = 0x20000,
+        FOS_HIDEPINNEDPLACES = 0x40000, FOS_NODEREFERENCELINKS = 0x100000, FOS_OKBUTTONNEEDSINTERACTION = 0x200000,
+        FOS_DONTADDTORECENT = 0x2000000, FOS_FORCESHOWHIDDEN = 0x10000000, FOS_DEFAULTNOMINIMODE = 0x20000000,
+        FOS_FORCEPREVIEWPANEON = 0x40000000, FOS_SUPPORTSTREAMABLEITEMS = 0x80000000
+    }
+    public enum SIGDN : uint { SIGDN_FILESYSPATH = 0x80058000 }
+
+    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItem {
+        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(SIGDN sigdnName, out IntPtr ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+
+    [ComImport, Guid("b63ea76d-1f85-456f-a19c-48159efa858b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItemArray {
+        void BindToHandler(IntPtr pbc, ref Guid rbhid, ref Guid riid, out IntPtr ppvOut);
+        void GetPropertyStore(int flags, ref Guid riid, out IntPtr ppv);
+        void GetPropertyDescriptionList(IntPtr keyType, ref Guid riid, out IntPtr ppv);
+        void GetAttributes(int AttribFlags, uint sfgaoMask, out uint psfgaoAttribs);
+        void GetCount(out uint pdwNumItems);
+        void GetItemAt(uint dwIndex, out IShellItem ppsi);
+        void EnumItems(out IntPtr ppenumShellItems);
+    }
+
+    [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IFileDialog {
+        [PreserveSig] uint Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(FOS fos);
+        void GetOptions(out FOS pfos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+        void GetResult(out IShellItem ppsi);
+        void AddPlace(IShellItem psi, int alignment);
+        void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+        void Close(int hr);
+        void SetClientGuid(ref Guid guid);
+        void ClearClientData();
+        void SetFilter(IntPtr pFilter);
+    }
+
+    [ComImport, Guid("d57c7288-d4ad-4768-be02-9d969532d960"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IFileOpenDialog {
+        [PreserveSig] uint Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(FOS fos);
+        void GetOptions(out FOS pfos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+        void GetResult(out IShellItem ppsi);
+        void AddPlace(IShellItem psi, int alignment);
+        void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+        void Close(int hr);
+        void SetClientGuid(ref Guid guid);
+        void ClearClientData();
+        void SetFilter(IntPtr pFilter);
+        void GetResults(out IShellItemArray ppenum);
+        void GetSelectedItems(out IShellItemArray ppsai);
+    }
+
+    [ComImport, Guid("dc1c5a9c-e88a-4dde-a5a1-60f82a20aef7")]
+    public class FileOpenDialogRCW { }
 }
 '@
 
@@ -240,10 +339,10 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
 
           <StackPanel Grid.Row="5" Margin="0,0,0,4">
             <StackPanel Orientation="Horizontal">
-              <Button x:Name="BtnBrowseFolder" Content="Browse Folder..." Foreground="#FF202020"/>
+              <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="#FF202020"/>
               <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="#FF202020"/>
             </StackPanel>
-            <TextBlock Text="If the drive isn't listed above, use Browse to add a folder (its sub-folders are included automatically) or add individual files." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick several at once - Ctrl/Shift-click; sub-folders are included automatically) or Add Files for individual files (also multi-select)." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
 
           <Grid Grid.Row="6" Margin="0,2,0,2">
@@ -595,21 +694,26 @@ function Test-TopLevelItemExists {
 
 function Add-BrowsedFolder {
     # Manual fallback for when the source drive isn't detected/listed above
-    # (or the operator just wants to point at an arbitrary folder): adds the
-    # picked folder as a new top-level, checked tree item. Its sub-folders
+    # (or the operator just wants to point at arbitrary folders): adds every
+    # picked folder as a new top-level, checked tree item. Their sub-folders
     # are included automatically via the same lazy-load-on-expand mechanism
-    # used for drive-based items, and the whole folder is captured
+    # used for drive-based items, and each whole folder is captured
     # recursively at capture time exactly like a drive-selected folder.
-    $picked = Select-Folder -Description 'Select a source folder to add (all its sub-folders and files are included)'
-    if (-not $picked) { return }
-    $picked = $picked.TrimEnd('\')
-    if (Test-TopLevelItemExists $picked) { Add-LogLine "Folder already in the selection: $picked" 'WARN'; return }
+    # The picker itself allows selecting several folders in one dialog.
+    $picked = @(Select-MultipleFolders -Title 'Select source folder(s) to add (all sub-folders and files are included)')
+    if ($picked.Count -eq 0) { return }
+    $added = 0
     $script:SuppressCascade = $true
     try {
-        [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $picked -Name (Split-Path -Leaf $picked) -IsFolder $true -Checked $true))
+        foreach ($p in $picked) {
+            $p = $p.TrimEnd('\')
+            if (Test-TopLevelItemExists $p) { Add-LogLine "Folder already in the selection: $p" 'WARN'; continue }
+            [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $p -Name (Split-Path -Leaf $p) -IsFolder $true -Checked $true))
+            $added++
+        }
     } finally { $script:SuppressCascade = $false }
     Update-SelectionCount
-    Add-LogLine "Folder added to selection: $picked" 'OK'
+    if ($added -gt 0) { Add-LogLine "$added folder(s) added to selection." 'OK' }
 }
 
 function Add-BrowsedFiles {
@@ -788,6 +892,78 @@ function Select-Folder {
     if ($Start -and (Test-Path -LiteralPath $Start)) { $dlg.SelectedPath = $Start }
     if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
     return $null
+}
+
+function Select-MultipleFolders {
+    <#
+    .SYNOPSIS Native Windows folder picker that allows selecting MULTIPLE
+              folders in one dialog (System.Windows.Forms.FolderBrowserDialog
+              only ever allows one).
+    .DESCRIPTION
+        This is the same modern Explorer-style dialog used throughout
+        Windows, via IFileOpenDialog with FOS_PICKFOLDERS + FOS_ALLOWMULTISELECT
+        - not a custom-built window. Applies the same enlarge-on-open
+        behaviour as Show-EnlargedDialog (which can't be reused directly
+        here since this isn't a System.Windows.Forms.CommonDialog).
+    .OUTPUTS string[] of the selected folder paths - empty if cancelled.
+    #>
+    param([string]$Title = 'Select folder(s)')
+
+    $dlg = New-Object Auto4950.FileOpenDialogRCW
+    $paths = @()
+    try {
+        $ifd = [Auto4950.IFileOpenDialog]$dlg
+        $ifd.SetOptions([Auto4950.FOS]::FOS_PICKFOLDERS -bor [Auto4950.FOS]::FOS_FORCEFILESYSTEM `
+            -bor [Auto4950.FOS]::FOS_ALLOWMULTISELECT -bor [Auto4950.FOS]::FOS_PATHMUSTEXIST)
+        $ifd.SetTitle($Title)
+
+        $mainHwnd = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+        $myPid    = [System.Diagnostics.Process]::GetCurrentProcess().Id
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 100
+        $timer.Add_Tick({
+            $hwnd = [Auto4950.NativeDialog]::GetForegroundWindow()
+            if ($hwnd -eq [IntPtr]::Zero -or $hwnd -eq $mainHwnd) { return }
+            $tpid = 0
+            [void][Auto4950.NativeDialog]::GetWindowThreadProcessId($hwnd, [ref]$tpid)
+            if ($tpid -ne $myPid) { return }
+            $rect = New-Object Auto4950.RECT
+            if ([Auto4950.NativeDialog]::GetWindowRect($hwnd, [ref]$rect)) {
+                $w = $rect.Right - $rect.Left; $h = $rect.Bottom - $rect.Top
+                $minW = 1000; $minH = 680
+                if ($w -lt $minW -or $h -lt $minH) {
+                    [void][Auto4950.NativeDialog]::SetWindowPos($hwnd, [IntPtr]::Zero, $rect.Left, $rect.Top, [Math]::Max($w, $minW), [Math]::Max($h, $minH), 0x0004)
+                }
+            }
+            $timer.Stop()
+        }.GetNewClosure())
+        $timer.Start()
+        $hr = 0
+        try { $hr = $ifd.Show($mainHwnd) } finally { $timer.Stop(); $timer.Dispose() }
+        if ($hr -ne 0) { return @() }   # non-zero HRESULT: cancelled (0x800704C7) or an error - either way, nothing picked
+
+        $results = $null
+        $ifd.GetResults([ref]$results)
+        try {
+            $count = 0
+            $results.GetCount([ref]$count)
+            for ($i = 0; $i -lt $count; $i++) {
+                $item = $null
+                $results.GetItemAt($i, [ref]$item)
+                try {
+                    $namePtr = [IntPtr]::Zero
+                    $item.GetDisplayName([Auto4950.SIGDN]::SIGDN_FILESYSPATH, [ref]$namePtr)
+                    if ($namePtr -ne [IntPtr]::Zero) {
+                        $paths += [System.Runtime.InteropServices.Marshal]::PtrToStringUni($namePtr)
+                        [System.Runtime.InteropServices.Marshal]::FreeCoTaskMem($namePtr)
+                    }
+                } finally { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) }
+            }
+        } finally { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($results) }
+    } finally {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($dlg)
+    }
+    return $paths
 }
 
 function Select-SevenZipFile {
@@ -1361,9 +1537,11 @@ WORKFLOW
      listed in the middle panel. Tick what to transfer (all by default); use
      "Select All" / "Deselect All" or untick individual items.
      If the drive doesn't appear in the "Source drive" list, use
-     "Browse Folder..." to add any folder directly (its sub-folders are
-     included automatically) and/or "Add Files..." to add individual files -
-     both add to whatever is already selected rather than replacing it.
+     "Browse Folders..." to add one or more folders directly (pick several at
+     once - Ctrl/Shift-click in the dialog; sub-folders are included
+     automatically) and/or "Add Files..." to add individual files (also
+     multi-select) - both add to whatever is already selected rather than
+     replacing it.
   2. Fill in a CMS case (starts with '$($config.CasePrefix)') and/or an OP NAME
      (UPPERCASE) - at least one of these two is required. PASS NUMBER is
      always optional. Whatever you provide is combined into the folder/file

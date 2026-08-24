@@ -77,9 +77,11 @@ lost either way).
   it (or capture the whole folder).
 - **If the source drive doesn't show up** in the dropdown (or you just want to
   add items from somewhere else), use the manual pickers below it:
-  - **Browse Folder...** opens the standard Windows folder browser and adds
-    the chosen folder as a new top-level item — its sub-folders and files are
-    included automatically, the same as a drive-scanned folder.
+  - **Browse Folders...** opens a **multi-select** Windows folder browser —
+    pick several folders in one dialog (Ctrl/Shift-click, same as picking
+    files in Explorer) — and adds each as a new top-level item; their
+    sub-folders and files are included automatically, the same as a
+    drive-scanned folder.
   - **Add Files...** opens a multi-select file picker and adds the chosen
     file(s) individually.
   - Both **add to** the existing selection rather than replacing it, so they

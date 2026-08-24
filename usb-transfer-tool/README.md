@@ -20,7 +20,7 @@ optional pass number.
 | Auto-transfer | Tick-box: start automatically on insert, needing only a CMS case **and/or** OP name (pass number alone is not enough) |
 | Choose folders/files/drives | Checkbox tree with **selectable sub-folders/files**; Select All / **Deselect All clears every level**; drive Refresh |
 | Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable |
-| Manual source picker | If a drive isn't auto-detected, **Browse Folder...** (Windows folder picker, sub-folders included automatically) and **Add Files...** (multi-select file picker) add items directly to the selection; both open enlarged for easier browsing |
+| Manual source picker | If a drive isn't auto-detected, **Browse Folders...** (native multi-select Windows folder picker — pick several folders in one dialog, sub-folders included automatically) and **Add Files...** (multi-select file picker) add items directly to the selection; both open enlarged for easier browsing |
 | Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
