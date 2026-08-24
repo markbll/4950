@@ -349,13 +349,13 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Selection:" FontWeight="Bold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-              <Button x:Name="BtnSelectAll"  Content="Select All"/>
-              <Button x:Name="BtnSelectNone" Content="Deselect All"/>
+              <Button x:Name="BtnClearSelection" Content="Clear Selection"/>
             </StackPanel>
           </Grid>
 
           <Border Grid.Row="7" Background="#FF20202A" CornerRadius="6" Margin="0,4">
-            <TreeView x:Name="TreeItems" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"/>
+            <ListBox x:Name="LstItems" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
           </Border>
 
           <TextBlock Grid.Row="8" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
@@ -529,7 +529,7 @@ function Add-LogLine {
 }
 
 # ----------------------------------------------------------------------------
-# Drive + tree population
+# Drive detection
 # ----------------------------------------------------------------------------
 function Get-AllDrives {
     # No DriveType filter - list every drive letter Windows exposes (fixed,
@@ -575,209 +575,121 @@ function Get-SelectedDriveRoot {
     return $null
 }
 
-$script:SuppressCascade = $false
+# ----------------------------------------------------------------------------
+# Selection: a flat list of top-level folders/files, built entirely from the
+# native Windows multi-select dialogs (Select-MultipleFolders / OpenFileDialog)
+# rather than an in-app checkbox tree - navigating to a specific deep
+# sub-folder is just normal Explorer navigation inside the dialog, with no
+# custom UI to expand level by level. A folder entry is captured recursively,
+# in full, at capture time - exactly as a checked folder used to be.
+# ----------------------------------------------------------------------------
+$script:SelectedItems = New-Object System.Collections.Generic.List[object]   # [pscustomobject]@{ Path; IsFolder }
 
-function Get-NodeCheckBox {
-    param($Tvi)
-    if ($Tvi -is [System.Windows.Controls.TreeViewItem] -and $Tvi.Header -is [System.Windows.Controls.CheckBox]) { return $Tvi.Header }
-    return $null
+function Get-SelectedItemPaths {
+    return @($script:SelectedItems | ForEach-Object { $_.Path })
 }
 
-function Set-SubtreeChecked {
-    param($Tvi, [bool]$Value)
-    foreach ($child in $Tvi.Items) {
-        if ($child -is [System.Windows.Controls.TreeViewItem]) {
-            $cb = Get-NodeCheckBox $child
-            if ($cb) { $cb.IsChecked = $Value }
-            Set-SubtreeChecked $child $Value
-        }
-    }
-}
-
-function Clear-Ancestors {
-    param($Tvi)
-    $p = $Tvi.Parent
-    while ($p -is [System.Windows.Controls.TreeViewItem]) {
-        $cb = Get-NodeCheckBox $p
-        if ($cb -and $cb.IsChecked) { $cb.IsChecked = $false }
-        $p = $p.Parent
-    }
-}
-
-function Invoke-NodeCascade {
-    param($Tvi, [bool]$Checked)
-    if ($script:SuppressCascade) { return }
-    $script:SuppressCascade = $true
-    try {
-        Set-SubtreeChecked $Tvi $Checked           # cascade down to loaded children
-        if (-not $Checked) { Clear-Ancestors $Tvi } # a parent is no longer "fully selected"
-    } finally { $script:SuppressCascade = $false }
-    Update-SelectionCount
-}
-
-function New-TreeCheckItem {
-    param([string]$FullPath, [string]$Name, [bool]$IsFolder, [bool]$Checked)
-    $cb = New-Object System.Windows.Controls.CheckBox
-    $cb.Content = $(if ($IsFolder) { "[Folder] $Name" } else { "[File]   $Name" })
-    $cb.IsChecked = $Checked
-    $cb.Foreground = $window.FindResource('Text')
-    $tvi = New-Object System.Windows.Controls.TreeViewItem
-    $tvi.Header = $cb
-    $tvi.Tag = @{ Path = $FullPath; IsFolder = $IsFolder; Loaded = $false }
-    # Store a back-reference so event handlers can find the node from the sender.
-    $cb.Tag = @{ Path = $FullPath; IsFolder = $IsFolder; Tvi = $tvi }
-    $cb.Add_Checked({   param($s, $e) Invoke-NodeCascade $s.Tag.Tvi $true })
-    $cb.Add_Unchecked({ param($s, $e) Invoke-NodeCascade $s.Tag.Tvi $false })
-    if ($IsFolder) {
-        [void]$tvi.Items.Add('...')   # placeholder -> lazy load on expand
-        $tvi.Add_Expanded({ param($s, $e) Expand-TreeNode $s })
-    }
-    return $tvi
-}
-
-function Expand-TreeNode {
-    param($Tvi)
-    if ($Tvi.Tag.Loaded) { return }
-    $Tvi.Tag.Loaded = $true
-    $Tvi.Items.Clear()
-    $parentCb = Get-NodeCheckBox $Tvi
-    $parentChecked = [bool]($parentCb -and $parentCb.IsChecked)
-    $excl = @($config.ExcludePatterns)
-    if ($ctrl.OptExcl) { $excl = @($ctrl.OptExcl.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
-    $script:SuppressCascade = $true   # building nodes must not trigger cascade
-    try {
-        $kids = Get-ChildItem -LiteralPath $Tvi.Tag.Path -Force -ErrorAction SilentlyContinue |
-            Where-Object { $excl -notcontains $_.Name } |
-            Sort-Object { -not $_.PSIsContainer }, Name | Select-Object -First 1000
-        foreach ($k in $kids) {
-            [void]$Tvi.Items.Add((New-TreeCheckItem -FullPath $k.FullName -Name $k.Name -IsFolder $k.PSIsContainer -Checked $parentChecked))
-        }
-        if ($Tvi.Items.Count -eq 0) {
-            $empty = New-Object System.Windows.Controls.TreeViewItem
-            $empty.Header = '(empty)'; $empty.Foreground = $window.FindResource('Muted')
-            [void]$Tvi.Items.Add($empty)
-        }
-    } catch {} finally { $script:SuppressCascade = $false }
-}
-
-function Update-TreeForDrive {
-    $ctrl.TreeItems.Items.Clear()
-    $root = Get-SelectedDriveRoot
-    if (-not $root) { Update-SelectionCount; return }
-    $rootPath = "$root\"
-    # Honour the live option controls (so edits take effect without pressing Save).
-    $checked = [bool]$config.DefaultSelectAll
-    $excl    = @($config.ExcludePatterns)
-    if ($ctrl.OptSelDefault) { $checked = [bool]$ctrl.OptSelDefault.IsChecked }
-    if ($ctrl.OptExcl)       { $excl = @($ctrl.OptExcl.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
-    $script:SuppressCascade = $true
-    try {
-        $entries = Get-ChildItem -LiteralPath $rootPath -Force -ErrorAction SilentlyContinue |
-            Where-Object { $excl -notcontains $_.Name } |
-            Sort-Object { -not $_.PSIsContainer }, Name
-        foreach ($e in $entries) {
-            [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $e.FullName -Name $e.Name -IsFolder $e.PSIsContainer -Checked $checked))
-        }
-    } catch {
-        Add-LogLine "Could not read drive $root : $($_.Exception.Message)" 'ERROR'
-    } finally { $script:SuppressCascade = $false }
-    Update-SelectionCount
+function Update-SelectionCount {
+    $ctrl.LblSelCount.Text = "$($script:SelectedItems.Count) item(s) selected"
 }
 
 function Test-TopLevelItemExists {
     param([string]$FullPath)
-    foreach ($tvi in $ctrl.TreeItems.Items) {
-        if ($tvi -is [System.Windows.Controls.TreeViewItem] -and $tvi.Tag.Path -eq $FullPath) { return $true }
+    return [bool]($script:SelectedItems | Where-Object { $_.Path -eq $FullPath })
+}
+
+function New-SelectionListRow {
+    param([string]$Path, [bool]$IsFolder)
+    $row = New-Object System.Windows.Controls.Grid
+    $row.Margin = '2,3'
+    foreach ($w in @([System.Windows.GridLength]::Auto, [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star), [System.Windows.GridLength]::Auto)) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$row.ColumnDefinitions.Add($cd)
     }
-    return $false
+
+    $icon = New-Object System.Windows.Controls.TextBlock
+    $icon.Text = $(if ($IsFolder) { '[Folder]' } else { '[File]  ' })
+    $icon.Foreground = $window.FindResource('Muted')
+    $icon.FontFamily = 'Consolas'
+    $icon.Margin = '2,0,8,0'
+    $icon.VerticalAlignment = 'Center'
+    [System.Windows.Controls.Grid]::SetColumn($icon, 0)
+
+    $pathText = New-Object System.Windows.Controls.TextBlock
+    $pathText.Text = $Path
+    $pathText.Foreground = $window.FindResource('Text')
+    $pathText.TextTrimming = 'CharacterEllipsis'
+    $pathText.ToolTip = $Path
+    $pathText.VerticalAlignment = 'Center'
+    [System.Windows.Controls.Grid]::SetColumn($pathText, 1)
+
+    $removeBtn = New-Object System.Windows.Controls.Button
+    $removeBtn.Content = 'Remove'
+    $removeBtn.Padding = '8,2'
+    $removeBtn.Margin = '8,0,2,0'
+    $removeBtn.FontSize = 11
+    $removeBtn.Tag = $Path
+    $removeBtn.Add_Click({ param($s, $e) Remove-SelectedItem -Path $s.Tag }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($removeBtn, 2)
+
+    [void]$row.Children.Add($icon)
+    [void]$row.Children.Add($pathText)
+    [void]$row.Children.Add($removeBtn)
+    return $row
+}
+
+function Add-SelectedItem {
+    param([string]$Path, [bool]$IsFolder)
+    $Path = $Path.TrimEnd('\')
+    if (Test-TopLevelItemExists $Path) { return $false }
+    $script:SelectedItems.Add([pscustomobject]@{ Path = $Path; IsFolder = $IsFolder })
+    [void]$ctrl.LstItems.Items.Add((New-SelectionListRow -Path $Path -IsFolder $IsFolder))
+    Update-SelectionCount
+    return $true
+}
+
+function Remove-SelectedItem {
+    param([string]$Path)
+    $idx = -1
+    for ($i = 0; $i -lt $script:SelectedItems.Count; $i++) { if ($script:SelectedItems[$i].Path -eq $Path) { $idx = $i; break } }
+    if ($idx -lt 0) { return }
+    $script:SelectedItems.RemoveAt($idx)
+    $ctrl.LstItems.Items.RemoveAt($idx)
+    Update-SelectionCount
+    Add-LogLine "Removed from selection: $Path" 'INFO'
+}
+
+function Clear-Selection {
+    $script:SelectedItems.Clear()
+    $ctrl.LstItems.Items.Clear()
+    Update-SelectionCount
 }
 
 function Add-BrowsedFolder {
-    # Manual fallback for when the source drive isn't detected/listed above
-    # (or the operator just wants to point at arbitrary folders): adds every
-    # picked folder as a new top-level, checked tree item. Their sub-folders
-    # are included automatically via the same lazy-load-on-expand mechanism
-    # used for drive-based items, and each whole folder is captured
-    # recursively at capture time exactly like a drive-selected folder.
-    # The picker itself allows selecting several folders in one dialog.
+    # Primary way to build the selection: the native multi-select Windows
+    # folder picker. Each picked folder is captured recursively, in full, at
+    # capture time - the same as a checked top-level folder used to be.
     $picked = @(Select-MultipleFolders -Title 'Select source folder(s) to add (all sub-folders and files are included)')
     if ($picked.Count -eq 0) { return }
     $added = 0
-    $script:SuppressCascade = $true
-    try {
-        foreach ($p in $picked) {
-            $p = $p.TrimEnd('\')
-            if (Test-TopLevelItemExists $p) { Add-LogLine "Folder already in the selection: $p" 'WARN'; continue }
-            [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $p -Name (Split-Path -Leaf $p) -IsFolder $true -Checked $true))
-            $added++
-        }
-    } finally { $script:SuppressCascade = $false }
-    Update-SelectionCount
+    foreach ($p in $picked) {
+        if (Add-SelectedItem -Path $p -IsFolder $true) { $added++ }
+        else { Add-LogLine "Folder already in the selection: $p" 'WARN' }
+    }
     if ($added -gt 0) { Add-LogLine "$added folder(s) added to selection." 'OK' }
 }
 
 function Add-BrowsedFiles {
-    # Manual fallback for adding individual files, independent of any
-    # drive/folder selection above.
+    # Native multi-select Windows file picker, for individual files.
     $dlg = New-Object System.Windows.Forms.OpenFileDialog
     $dlg.Title       = 'Select file(s) to add to the selection'
     $dlg.Multiselect = $true
     $dlg.Filter      = 'All files (*.*)|*.*'
     if ((Show-EnlargedDialog -Dialog $dlg) -ne [System.Windows.Forms.DialogResult]::OK) { return }
     $added = 0
-    $script:SuppressCascade = $true
-    try {
-        foreach ($f in $dlg.FileNames) {
-            if (Test-TopLevelItemExists $f) { continue }
-            [void]$ctrl.TreeItems.Items.Add((New-TreeCheckItem -FullPath $f -Name (Split-Path -Leaf $f) -IsFolder $false -Checked $true))
-            $added++
-        }
-    } finally { $script:SuppressCascade = $false }
-    Update-SelectionCount
+    foreach ($f in $dlg.FileNames) { if (Add-SelectedItem -Path $f -IsFolder $false) { $added++ } }
     if ($added -gt 0) { Add-LogLine "$added file(s) added to selection." 'OK' }
-}
-
-function Add-CheckedFromNode {
-    param($Tvi, $Result)
-    $cb = Get-NodeCheckBox $Tvi
-    if (-not $cb) { return }
-    if ($cb.IsChecked) {
-        # Highest checked node covers everything below it -> include and stop.
-        $Result.Add($cb.Tag.Path)
-        return
-    }
-    # Unchecked: descend into any loaded children for individually-checked items.
-    foreach ($child in $Tvi.Items) {
-        if ($child -is [System.Windows.Controls.TreeViewItem]) { Add-CheckedFromNode $child $Result }
-    }
-}
-
-function Get-CheckedItems {
-    $result = New-Object System.Collections.Generic.List[string]
-    foreach ($tvi in $ctrl.TreeItems.Items) {
-        if ($tvi -is [System.Windows.Controls.TreeViewItem]) { Add-CheckedFromNode $tvi $result }
-    }
-    return $result
-}
-
-function Update-SelectionCount {
-    $n = (Get-CheckedItems).Count
-    $ctrl.LblSelCount.Text = "$n item(s) selected"
-}
-
-function Set-AllChecks {
-    param([bool]$Value)
-    $script:SuppressCascade = $true
-    try {
-        foreach ($tvi in $ctrl.TreeItems.Items) {
-            if ($tvi -is [System.Windows.Controls.TreeViewItem]) {
-                $cb = Get-NodeCheckBox $tvi
-                if ($cb) { $cb.IsChecked = $Value }
-                Set-SubtreeChecked $tvi $Value   # recurse into all loaded sub-folders/files
-            }
-        }
-    } finally { $script:SuppressCascade = $false }
-    Update-SelectionCount
 }
 
 
@@ -1269,7 +1181,7 @@ function Start-Capture {
         return
     }
 
-    $items = Get-CheckedItems
+    $items = Get-SelectedItemPaths
     if ($items.Count -eq 0) {
         [System.Windows.MessageBox]::Show('Select at least one folder or file to capture.', 'Nothing selected', 'OK', 'Warning') | Out-Null
         return
@@ -1471,11 +1383,22 @@ $usbTimer.Interval = [TimeSpan]::FromMilliseconds(800)
 $usbTimer.Add_Tick({
     while ($script:UsbEvents.Count -gt 0) {
         $drive = $script:UsbEvents.Dequeue()
-        # Scan the new drive and list its folders/files for selection.
         Update-DriveList -Prefer $drive
-        Update-TreeForDrive
-        $n = (Get-CheckedItems).Count
-        Add-LogLine "USB drive connected: $drive - scanned, $n item(s) listed." 'STEP'
+        # "Select all folders/files by default" now means: add the whole
+        # drive as one folder entry (captured recursively, in full, at
+        # capture time) - the flat-list equivalent of the old tree opening
+        # fully checked. Otherwise nothing is added automatically; use
+        # Browse Folders.../Add Files... to build the selection.
+        $selectAllDefault = if ($ctrl.OptSelDefault) { [bool]$ctrl.OptSelDefault.IsChecked } else { [bool]$config.DefaultSelectAll }
+        if ($selectAllDefault) {
+            if (Add-SelectedItem -Path "$drive\" -IsFolder $true) {
+                Add-LogLine "USB drive connected: $drive - added to selection (Select all by default)." 'STEP'
+            } else {
+                Add-LogLine "USB drive connected: $drive - already in the selection." 'STEP'
+            }
+        } else {
+            Add-LogLine "USB drive connected: $drive - use Browse Folders.../Add Files... to add items." 'STEP'
+        }
         $ctrl.StatusLine.Text = "USB drive $drive connected and scanned."
         if ($script:Shared.Running) { continue }
 
@@ -1533,15 +1456,14 @@ function Show-Help {
 Auto 49/50  (version $script:AppVersion) - USB Compression & Transfer Tool
 
 WORKFLOW
-  1. Connect a USB drive. It is scanned automatically and its folders/files are
-     listed in the middle panel. Tick what to transfer (all by default); use
-     "Select All" / "Deselect All" or untick individual items.
-     If the drive doesn't appear in the "Source drive" list, use
-     "Browse Folders..." to add one or more folders directly (pick several at
-     once - Ctrl/Shift-click in the dialog; sub-folders are included
-     automatically) and/or "Add Files..." to add individual files (also
-     multi-select) - both add to whatever is already selected rather than
-     replacing it.
+  1. Build the selection using "Browse Folders..." (native multi-select
+     Windows folder picker - pick several folders at once with Ctrl/Shift-
+     click; each one's sub-folders and files are included automatically) and
+     "Add Files..." (multi-select file picker, for individual files). Both
+     add to the list rather than replacing it. Remove an item with its own
+     "Remove" button, or clear everything with "Clear Selection".
+     If "Select all folders/files by default" is on in Options, plugging in
+     a USB drive adds the whole drive to the selection automatically.
   2. Fill in a CMS case (starts with '$($config.CasePrefix)') and/or an OP NAME
      (UPPERCASE) - at least one of these two is required. PASS NUMBER is
      always optional. Whatever you provide is combined into the folder/file
@@ -1642,24 +1564,22 @@ See README.md and docs\USER_GUIDE.md for full documentation.
 # ----------------------------------------------------------------------------
 # Wire up events
 # ----------------------------------------------------------------------------
-$ctrl.BtnRefresh.Add_Click({ Update-DriveList; Update-TreeForDrive; Add-LogLine 'Drives rescanned.' 'INFO' })
+$ctrl.BtnRefresh.Add_Click({ Update-DriveList; Add-LogLine 'Drives rescanned.' 'INFO' })
 $ctrl.BtnToggleOptions.Add_Click({ Toggle-OptionsPanel })
-$ctrl.BtnDriveRefresh.Add_Click({ Update-DriveList; Update-TreeForDrive; Add-LogLine 'Drives refreshed.' 'INFO' })
+$ctrl.BtnDriveRefresh.Add_Click({ Update-DriveList; Add-LogLine 'Drives refreshed.' 'INFO' })
 $ctrl.BtnBrowseFolder.Add_Click({ Add-BrowsedFolder })
 $ctrl.BtnBrowseFiles.Add_Click({ Add-BrowsedFiles })
 $ctrl.BtnHelp.Add_Click({ Show-Help })
 $ctrl.BtnQuick.Add_Click({ Set-QuickTransfer })
 $ctrl.BtnStart.Add_Click({ Start-Capture })
 $ctrl.BtnCancel.Add_Click({ Stop-Capture })
-$ctrl.BtnSelectAll.Add_Click({ Set-AllChecks $true })
-$ctrl.BtnSelectNone.Add_Click({ Set-AllChecks $false })
+$ctrl.BtnClearSelection.Add_Click({ Clear-Selection })
 $ctrl.BtnSaveOptions.Add_Click({ Save-Options })
 $ctrl.BtnBrowseNet.Add_Click({ $p = Select-Folder 'Select the destination folder (UNC share or local path)' $ctrl.OptNet.Text; if ($p) { $ctrl.OptNet.Text = $p } })
 $ctrl.BtnBrowseStage.Add_Click({ $p = Select-Folder 'Select the local staging folder' (Expand-A4950Path $ctrl.OptStage.Text); if ($p) { $ctrl.OptStage.Text = $p } })
 $ctrl.BtnBrowse7z.Add_Click({ $p = Select-SevenZipFile; if ($p) { $ctrl.Opt7z.Text = $p } })
 $ctrl.OptLevel.Add_ValueChanged({ $ctrl.OptLevelLbl.Text = "Compression level: $([int]$ctrl.OptLevel.Value)" })
 $ctrl.OptFormat.Add_SelectionChanged({ if ($ctrl.OptFormat.SelectedItem) { $config.ArchiveFormat = $ctrl.OptFormat.SelectedItem.Content; Update-NamePreview } })
-$ctrl.CmbDrive.Add_SelectionChanged({ Update-TreeForDrive })
 $ctrl.TxtCase.Add_TextChanged({
     $t = $ctrl.TxtCase.Text.Trim()
     $blank = (-not $t) -or ($t -eq $config.CasePrefix)
@@ -1683,7 +1603,7 @@ $window.Add_Loaded({
     $window.Title = "Auto 49/50 v$script:AppVersion - USB Compression & Transfer Tool"
     Set-OptionsFromConfig
     Update-DriveList
-    Update-TreeForDrive
+    Update-SelectionCount
     Update-Footer
     Update-NamePreview
     Register-UsbWatcher

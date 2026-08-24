@@ -15,12 +15,11 @@ optional pass number.
 
 | Requirement | How it's delivered |
 |---|---|
-| Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is scanned and listed on insert |
+| Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is detected on insert |
 | Prompt before acting | Yes/No dialog on insert (`AutoPromptOnInsert`), plus a final confirm |
 | Auto-transfer | Tick-box: start automatically on insert, needing only a CMS case **and/or** OP name (pass number alone is not enough) |
-| Choose folders/files/drives | Checkbox tree with **selectable sub-folders/files**; Select All / **Deselect All clears every level**; drive Refresh |
-| Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable |
-| Manual source picker | If a drive isn't auto-detected, **Browse Folders...** (native multi-select Windows folder picker — pick several folders in one dialog, sub-folders included automatically) and **Add Files...** (multi-select file picker) add items directly to the selection; both open enlarged for easier browsing |
+| Choose folders/files | Built entirely from **native Windows multi-select dialogs** - **Browse Folders...** (pick several folders in one dialog; each captured recursively, in full) and **Add Files...** (pick several individual files) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
+| Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
 | Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
@@ -104,8 +103,10 @@ powershell -ExecutionPolicy Bypass -File .\Start-Auto4950.ps1
 
 Or right-click either `.ps1` and choose **Run with PowerShell**.
 
-1. Connect a USB drive → it is **scanned** and its folders/files are listed.
-2. Tick what to capture (all pre-selected); use **Select All** / **Deselect All**.
+1. Connect a USB drive → it's detected and available in the "Source drive" list.
+2. Click **Browse Folders...** and/or **Add Files...** to build the selection from
+   the native Windows multi-select picker (or leave "Select all folders/files by
+   default" on in Options to add the whole drive automatically on insert).
 3. Enter **either** a CMS case (e.g. `CMS-A12345`) **or** an **UPPERCASE** OP name.
 4. Click **Start Capture** and confirm — or tick **Auto-transfer** to skip the
    prompts and start automatically whenever a drive is plugged in (it just needs

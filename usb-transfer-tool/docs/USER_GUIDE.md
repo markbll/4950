@@ -65,27 +65,29 @@ lost either way).
 - **Job progress** — current stage (hashing / compressing) and percentage.
 
 ### Selection panel
-- On insert the drive is **scanned automatically**; you don't have to ask for it.
-- Pick the **source drive** from the dropdown (auto-selected on USB insert).
-- The tree lists the drive's top-level **folders** and **files**, each with a
-  checkbox. **Everything is ticked by default.** Expand a folder to review its
-  contents. Use **Select All** / **Deselect All**, or untick individual items —
-  every selection can be de-selected.
-- Selection granularity is **top-level items** (or specific sub-folders/files
-  within them). Everything you tick is combined into **one** archive for the
-  job — to capture a specific sub-folder only, untick the parent and drill into
-  it (or capture the whole folder).
-- **If the source drive doesn't show up** in the dropdown (or you just want to
-  add items from somewhere else), use the manual pickers below it:
-  - **Browse Folders...** opens a **multi-select** Windows folder browser —
-    pick several folders in one dialog (Ctrl/Shift-click, same as picking
-    files in Explorer) — and adds each as a new top-level item; their
-    sub-folders and files are included automatically, the same as a
-    drive-scanned folder.
-  - **Add Files...** opens a multi-select file picker and adds the chosen
-    file(s) individually.
-  - Both **add to** the existing selection rather than replacing it, so they
-    can be combined freely with a drive-scanned tree or with each other.
+The selection is built entirely from **native Windows multi-select dialogs** —
+there's no in-app tree to expand level by level. Reaching a specific deep
+sub-folder is just normal Explorer navigation inside the picker, not custom
+UI.
+
+- **Browse Folders...** opens the native Windows folder browser with
+  **multi-select turned on** — pick several folders in one dialog
+  (Ctrl/Shift-click, same as picking files in Explorer). Each one is added as
+  a top-level entry and captured **recursively, in full** — everything
+  beneath it — at capture time.
+- **Add Files...** opens a multi-select file picker for individual files.
+- Both **add to** the existing selection rather than replacing it, so folders
+  and loose files combine freely. Each row in the list has its own
+  **Remove**; **Clear Selection** empties the whole list.
+- Pick the **source drive** from the dropdown (auto-selected on USB insert) —
+  it's shown in the confirm summary and used by "Select all by default"
+  below, but doesn't scan or list anything on its own.
+- **"Select all folders/files by default"** (Options → Behaviour): when on,
+  plugging in a USB drive adds the **whole drive** to the selection
+  automatically, with no dialog — the flat-list equivalent of the old tree
+  opening fully ticked. When off, nothing is added automatically; build the
+  selection with Browse Folders.../Add Files... instead.
+- Everything in the list is combined into **one** archive for the job.
 
 ### CMS case number / OP name
 - Provide **at least one** of:
@@ -131,9 +133,12 @@ ever colliding at the destination, without needing a folder per case.
 
 ## 3. Running a capture
 
-1. **Connect the USB drive** — it is scanned and its contents listed. With
-   prompt-on-insert on (and auto-transfer off) a **Yes/No** dialog appears.
-2. Confirm/adjust the **selection** and enter a **CMS case and/or OP name**
+1. **Connect the USB drive** — it becomes available in the "Source drive"
+   list, and (with "Select all folders/files by default" on) is added to the
+   selection automatically. With prompt-on-insert on (and auto-transfer off)
+   a **Yes/No** dialog appears.
+2. Build/adjust the **selection** with Browse Folders.../Add Files... and
+   enter a **CMS case and/or OP name**
    (at least one is required), plus an optional **pass number**.
 3. Click **Start Capture**. The tool logs a **staging space guide** (see
    below) and, unless auto-transfer is on, shows a confirm summary dialog
@@ -262,9 +267,9 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Embed manifest | Include the manifest inside each archive |
 | Prompt on insert | Show the Yes/No dialog automatically (when auto-transfer is off) |
 | Auto-transfer | Start automatically on insert; needs a CMS case or OP name |
-| Select all by default | Pre-tick every folder/file |
+| Select all by default | On USB insert, add the whole drive to the selection automatically |
 | Verify after transfer | Re-hash the archive at the destination |
-| Exclude patterns | Names to skip (e.g. `System Volume Information`) |
+| Exclude patterns | Names to skip when compressing (e.g. `System Volume Information`) |
 
 Local copies are always kept in the staging folder (no setting for this) -
 see "Temp cleanup" above for how to remove them.
@@ -278,7 +283,7 @@ see "Temp cleanup" above for how to remove them.
 | "7-Zip not found" | Install 7-Zip or set the path in the Options panel. |
 | "USB auto-detection unavailable" | WMI eventing blocked; use **Rescan Drives** and pick the drive manually. |
 | Share "not writable" in Setup | Check the UNC path, permissions, and that you're authenticated to it. |
-| Nothing selected | Tick at least one item, or use **Select All**. |
+| Nothing selected | Add at least one item with **Browse Folders...** or **Add Files...**, or turn on "Select all folders/files by default" in Options. |
 | Case number rejected | It must start with `CMS-A` (or your prefix) and have an identifier. |
 | Slow compression | Lower the compression level; level 1–3 is much faster. |
 | Verify fails | Re-run; check network stability and destination free space. |
