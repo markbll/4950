@@ -41,7 +41,7 @@ detects this and will tell you.
 
 ```
 ┌ Header ───────────────────────────────────────────────────────────────────────────┐
-│ Auto 49/50 + status      [Quick Transfer] [Rescan Drives] [Hide Options] [Help]     │
+│ Auto 49/50 + status  [Quick Transfer][Rescan Drives][Slow Machine: OFF][Hide Options][Help] │
 ├ System Monitor ─┬ Details + Selection ─┬ Options ───────────┬ Activity Log ────────┤
 │ CPU             │ CMS Case Number      │ Destination         │ [09:31:02] ...        │
 │ Memory          │ OP Name (UPPERCASE)  │ Format / Split size │ colour-coded          │
@@ -124,6 +124,27 @@ The embedded manifest and the transfer log sent to the destination share the
 same name. This keeps repeated jobs - even with the same case/OP/pass - from
 ever colliding at the destination, without needing a folder per case.
 
+### Slow Machine Mode
+Click **Slow Machine: OFF** in the header to turn it **ON** for an old or
+low-spec machine. While it's on:
+- The **System Monitor** (CPU/Memory/Network/Temp) stops polling entirely and
+  is hidden, rather than just polling less often.
+- Compression is forced to **store** (no compression math) and
+  **single-threaded**, regardless of the Level/format set in Options - this
+  trades speed and archive size for the smallest possible CPU/RAM load.
+- Hashing, the manifest and verification are **not** affected — integrity is
+  never traded away for resource usage.
+
+Click the button again to turn it back off. It's a session toggle rather
+than an Options-panel checkbox, so it takes effect immediately without
+needing **Save Options**.
+
+### Completion summary
+When a job finishes, the Activity Log (and the "Transfer finished" popup)
+lists the **destination** path and the **name of every file** written there
+— the archive (or each of its volumes) plus the transfer log — so you can
+see exactly what landed where without opening the destination folder.
+
 ---
 
 ## 3. Running a capture
@@ -132,8 +153,11 @@ ever colliding at the destination, without needing a folder per case.
    list, and (with "Select all folders/files by default" on) is added to the
    selection automatically. With prompt-on-insert on, a **Yes/No** dialog
    appears.
-2. Build/adjust the **selection** with Browse Folders.../Add Files... and
-   enter a **CMS case and/or OP name**
+2. Build/adjust the **selection** with Browse Folders.../Add Files..., or by
+   picking a drive from the "Source drive" dropdown (opens a folder browser
+   rooted at that drive so you can add a folder/sub-folder straight from it —
+   handy for local drives and external HDDs, not just USB sticks). Enter a
+   **CMS case and/or OP name**
    (at least one is required), plus an optional **pass number**.
 3. Click **Start Capture**. The tool logs a **staging space guide** (see
    below) and shows a confirm summary dialog listing every selected item's

@@ -231,6 +231,7 @@ function Invoke-A4950TransferJob {
                 $a = New-A4950Archive -SevenZipPath $sevenZip -SourcePath $existingItems -ArchivePath $archivePath `
                         -Level $cfg.CompressionLevel -Format $cfg.ArchiveFormat -VolumeSizeMB $volMB -Password $cfg.Password `
                         -ExcludePatterns $cfg.ExcludePatterns -ExtraFiles $extraFiles -CancelCheck $cancel `
+                        -LowResource:([bool]$cfg.SlowMachineMode) `
                         -OnPartReady ({
                             param($p)
                             $transferQueue.Enqueue($p)
@@ -270,6 +271,7 @@ function Invoke-A4950TransferJob {
         # ---------------------------------------------------------------------
         # Transfer log. On cancel/failure it is marked "FAILED TRANSFER".
         # ---------------------------------------------------------------------
+        $logFileName = $null
         if ($ok -gt 0) {
             $isFailed = $cancelled -or ($fail -gt 0)
             $logName  = if ($isFailed) { "${uniqueBase}_FAILED_TRANSFER.log" } else { "${uniqueBase}_TRANSFER.log" }
@@ -278,7 +280,10 @@ function Invoke-A4950TransferJob {
                 Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed | Out-Null
                 # Copy the log to the destination (no cancel check - always send it).
                 $lt = Copy-A4950ToShare -SourceFile $logPath -DestinationFolder $destFolder -TimeStamp $Shared.Stamp
-                if ($lt.Success) { Write-A4950WorkerLog $Shared "Transfer log written and sent: $logName" ($(if ($isFailed) {'WARN'} else {'OK'})) }
+                if ($lt.Success) {
+                    $logFileName = Split-Path -Leaf $lt.Destination
+                    Write-A4950WorkerLog $Shared "Transfer log written and sent: $logFileName" ($(if ($isFailed) {'WARN'} else {'OK'}))
+                }
             } catch { Write-A4950WorkerLog $Shared "Could not write/send transfer log: $($_.Exception.Message)" 'ERROR' }
         }
 
@@ -307,7 +312,11 @@ function Invoke-A4950TransferJob {
         # Staging is included so the GUI's "Delete Local Copies" button knows
         # what to remove; omitted when cancelled since it's already gone above.
         $stagingForGui = if ($cancelled) { $null } else { $staging }
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui }
+        # Every file actually written to the destination: the archive
+        # volume(s)/single archive plus the transfer log copied alongside it.
+        $filesForGui = @($done | ForEach-Object { $_.Name })
+        if ($logFileName) { $filesForGui += $logFileName }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui; Files = $filesForGui }
     }
     catch {
         Write-A4950WorkerLog $Shared "FATAL: $($_.Exception.Message)" 'ERROR'

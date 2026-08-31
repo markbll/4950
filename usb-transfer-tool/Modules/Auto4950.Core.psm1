@@ -46,6 +46,7 @@ function Get-DefaultConfig {
         DefaultSelectAll    = $true                    # Pre-select all folders/files by default
         VerifyAfterTransfer = $true                    # Re-hash the archive at destination
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
+        SlowMachineMode     = $false                   # Low CPU/RAM/GPU mode: no system monitor, single-threaded compression
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
     }
@@ -334,7 +335,8 @@ function New-A4950Archive {
         [string[]]$ExtraFiles,          # Additional files to add (e.g. the manifest)
         [scriptblock]$CancelCheck,      # Return $true to abort (kills 7-Zip)
         [scriptblock]$OnPartReady,      # Called with a produced file's path as soon as it is complete
-        [scriptblock]$OnOutput
+        [scriptblock]$OnOutput,
+        [switch]$LowResource            # Slow Machine Mode: single-threaded, capped compression level
     )
 
     $archiveDir = Split-Path -Parent $ArchivePath
@@ -364,10 +366,15 @@ function New-A4950Archive {
     # split it ourselves afterwards (see Split-A4950File below); for 7z we let
     # 7-Zip's own -v do it natively as before.
     $splitZipOurselves = ($Format -eq 'zip' -and $VolumeSizeMB -gt 0)
+    # Slow Machine Mode trades compression ratio for the smallest possible CPU
+    # footprint: store (no compression math, just I/O) and single-threaded,
+    # regardless of the Level/format the operator has set. Hashing, manifest
+    # and verification are unaffected - only the compression cost changes.
+    $effectiveLevel = if ($LowResource) { 0 } else { $Level }
     $szArgs = [System.Collections.Generic.List[string]]::new()
-    $szArgs.AddRange([string[]]@('a', "-t$Format", "-mx=$Level", '-y', $ArchivePath))
+    $szArgs.AddRange([string[]]@('a', "-t$Format", "-mx=$effectiveLevel", '-y', $ArchivePath))
     foreach ($sp in $SourcePath) { $szArgs.Add($sp) }
-    $szArgs.Add('-mmt=on')   # multi-threaded compression - 7-Zip supports this for both zip (deflate) and 7z
+    if ($LowResource) { $szArgs.Add('-mmt=off') } else { $szArgs.Add('-mmt=on') }   # multi-threaded compression - 7-Zip supports this for both zip (deflate) and 7z
     if ($VolumeSizeMB -gt 0 -and -not $splitZipOurselves) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes
     if ($ExtraFiles)      { foreach ($ef in $ExtraFiles) { $szArgs.Add($ef) } }
     if ($Password) {

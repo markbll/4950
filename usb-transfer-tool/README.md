@@ -18,8 +18,10 @@ optional pass number.
 | Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is detected on insert |
 | Prompt before acting | Yes/No dialog on insert (`AutoPromptOnInsert`), plus a final confirm |
 | Choose folders/files | Built entirely from standard Windows dialogs - **Browse Folders...** (folder browser, looped so several folders can be added in one flow; each captured recursively, in full) and **Add Files...** (multi-select file picker) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
-| Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
+| Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. Picking a drive from this dropdown by hand opens a folder browser rooted at that drive so you can pick a folder/sub-folder straight from it. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
 | Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
+| Completion summary | When a job finishes, the destination path and the name of every file written there (archive/volumes + transfer log) are logged to the Activity Log and the "Transfer finished" popup |
+| Slow Machine Mode | Header button for old/low-spec hardware: turns off the System Monitor's CPU/Memory/Network/Temp polling and forces single-threaded, store-only (no compression math) 7-Zip — trades speed for the smallest possible CPU/RAM footprint. Hashing, manifest and verification are unaffected |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |

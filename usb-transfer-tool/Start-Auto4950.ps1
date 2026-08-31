@@ -71,6 +71,8 @@ $script:WorkerPs     = $null
 $script:WorkerRs     = $null
 $script:WorkerHandle = $null
 $script:LastJobStaging = $null   # local staging folder of the last completed job, for "Delete Local Copies"
+$script:SuppressDriveBrowse = $false   # true while Update-DriveList sets CmbDrive programmatically
+$script:SlowMachineMode = $false
 
 # ----------------------------------------------------------------------------
 # XAML - user interface definition
@@ -142,6 +144,7 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnQuick"    Content="Quick Transfer" Background="#FF7B5BD1"/>
           <Button x:Name="BtnRefresh"  Content="Rescan Drives"/>
+          <Button x:Name="BtnSlowMachine" Content="Slow Machine: OFF" ToolTip="Turns off the System Monitor and forces low-CPU, single-threaded compression - for old or low-spec machines"/>
           <Button x:Name="BtnToggleOptions" Content="Hide Options"/>
           <Button x:Name="BtnHelp"     Content="Help"/>
         </StackPanel>
@@ -160,25 +163,28 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
       <!-- Live system stats -->
       <Border Grid.Column="0" Style="{StaticResource Card}">
         <StackPanel>
-          <TextBlock Text="SYSTEM MONITOR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,8"/>
+          <StackPanel x:Name="PanelSysMonitor">
+            <TextBlock Text="SYSTEM MONITOR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,8"/>
 
-          <TextBlock Text="CPU"/>
-          <ProgressBar x:Name="BarCpu" Height="14" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A"/>
-          <TextBlock x:Name="LblCpu" Text="0 %" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock Text="CPU"/>
+            <ProgressBar x:Name="BarCpu" Height="14" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A"/>
+            <TextBlock x:Name="LblCpu" Text="0 %" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
 
-          <TextBlock Text="Memory"/>
-          <ProgressBar x:Name="BarMem" Height="14" Minimum="0" Maximum="100" Foreground="#FFFFA726" Background="#FF20202A"/>
-          <TextBlock x:Name="LblMem" Text="0 % (0 / 0 MB)" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock Text="Memory"/>
+            <ProgressBar x:Name="BarMem" Height="14" Minimum="0" Maximum="100" Foreground="#FFFFA726" Background="#FF20202A"/>
+            <TextBlock x:Name="LblMem" Text="0 % (0 / 0 MB)" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
 
-          <TextBlock Text="Network Throughput"/>
-          <ProgressBar x:Name="BarNet" Height="14" Minimum="0" Maximum="1000" Foreground="{StaticResource Accent}" Background="#FF20202A"/>
-          <TextBlock x:Name="LblNet" Text="0 Mbps" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock Text="Network Throughput"/>
+            <ProgressBar x:Name="BarNet" Height="14" Minimum="0" Maximum="1000" Foreground="{StaticResource Accent}" Background="#FF20202A"/>
+            <TextBlock x:Name="LblNet" Text="0 Mbps" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
 
-          <TextBlock Text="Temp Folder Free Space"/>
-          <ProgressBar x:Name="BarTemp" Height="14" Minimum="0" Maximum="100" Foreground="#FFAB47BC" Background="#FF20202A"/>
-          <TextBlock x:Name="LblTemp" Text="0 GB free" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock Text="Temp Folder Free Space"/>
+            <ProgressBar x:Name="BarTemp" Height="14" Minimum="0" Maximum="100" Foreground="#FFAB47BC" Background="#FF20202A"/>
+            <TextBlock x:Name="LblTemp" Text="0 GB free" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <Separator Margin="0,6"/>
+          </StackPanel>
+          <TextBlock x:Name="LblSlowMachineNote" Text="System Monitor is off (Slow Machine Mode)." Foreground="{StaticResource Muted}" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
 
-          <Separator Margin="0,6"/>
           <TextBlock Text="Job Progress" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,4,0,4"/>
           <TextBlock x:Name="LblStage" Text="No job running" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
           <ProgressBar x:Name="BarJob" Height="16" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A" Margin="0,4,0,0"/>
@@ -236,8 +242,8 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
 
           <StackPanel Grid.Row="4" Margin="0,0,0,4">
             <StackPanel Orientation="Horizontal">
-              <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="#FF202020"/>
-              <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="#FF202020"/>
+              <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="White"/>
+              <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="White"/>
             </StackPanel>
             <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick one, then choose to add another; sub-folders are included automatically) or Add Files for individual files (multi-select)." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
@@ -448,20 +454,28 @@ function Get-AllDrives {
 
 function Update-DriveList {
     param([string]$Prefer)
-    $ctrl.CmbDrive.Items.Clear()
-    $drives = Get-AllDrives
-    foreach ($d in $drives) {
-        $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
-        [void]$ctrl.CmbDrive.Items.Add($label)
-    }
-    if ($ctrl.CmbDrive.Items.Count -gt 0) {
-        $sel = 0
-        if ($Prefer) {
-            for ($i = 0; $i -lt $ctrl.CmbDrive.Items.Count; $i++) {
-                if ($ctrl.CmbDrive.Items[$i].ToString().StartsWith($Prefer)) { $sel = $i; break }
-            }
+    # Suppress the "browse this drive" popup on CmbDrive.SelectionChanged while
+    # this function sets the list/selection programmatically - it should only
+    # fire when the operator picks a drive by hand.
+    $script:SuppressDriveBrowse = $true
+    try {
+        $ctrl.CmbDrive.Items.Clear()
+        $drives = Get-AllDrives
+        foreach ($d in $drives) {
+            $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
+            [void]$ctrl.CmbDrive.Items.Add($label)
         }
-        $ctrl.CmbDrive.SelectedIndex = $sel
+        if ($ctrl.CmbDrive.Items.Count -gt 0) {
+            $sel = 0
+            if ($Prefer) {
+                for ($i = 0; $i -lt $ctrl.CmbDrive.Items.Count; $i++) {
+                    if ($ctrl.CmbDrive.Items[$i].ToString().StartsWith($Prefer)) { $sel = $i; break }
+                }
+            }
+            $ctrl.CmbDrive.SelectedIndex = $sel
+        }
+    } finally {
+        $script:SuppressDriveBrowse = $false
     }
 }
 
@@ -943,6 +957,38 @@ function Hide-OptionsPanel {
 }
 
 # ----------------------------------------------------------------------------
+# Slow Machine Mode: for old/low-spec hardware. Stops the System Monitor
+# polling outright (rather than just slowing it) and forces single-threaded,
+# low-level 7-Zip compression, trading speed for a small, predictable
+# CPU/RAM footprint. Hashing and verification are untouched - integrity
+# never gets weakened for the sake of resource usage.
+# ----------------------------------------------------------------------------
+function Set-SlowMachineMode {
+    param([bool]$On)
+    $script:SlowMachineMode = $On
+    $config.SlowMachineMode = $On
+    if ($On) {
+        $statsTimer.Stop()
+        $ctrl.PanelSysMonitor.Visibility = 'Collapsed'
+        $ctrl.LblSlowMachineNote.Visibility = 'Visible'
+        $pumpTimer.Interval = [TimeSpan]::FromMilliseconds(600)
+        $usbTimer.Interval  = [TimeSpan]::FromMilliseconds(2000)
+        $ctrl.BtnSlowMachine.Content = 'Slow Machine: ON'
+        $ctrl.BtnSlowMachine.Background = '#FF2E7D32'
+        Add-LogLine 'Slow Machine Mode ON: System Monitor stopped; compression forced to single-threaded, store (no compression math).' 'WARN'
+    } else {
+        $ctrl.PanelSysMonitor.Visibility = 'Visible'
+        $ctrl.LblSlowMachineNote.Visibility = 'Collapsed'
+        $statsTimer.Start()
+        $pumpTimer.Interval = [TimeSpan]::FromMilliseconds(250)
+        $usbTimer.Interval  = [TimeSpan]::FromMilliseconds(800)
+        $ctrl.BtnSlowMachine.Content = 'Slow Machine: OFF'
+        $ctrl.BtnSlowMachine.Background = '#FF3A3A46'
+        Add-LogLine 'Slow Machine Mode OFF: System Monitor and normal multi-threaded compression restored.' 'INFO'
+    }
+}
+
+# ----------------------------------------------------------------------------
 # Start / cancel the capture job
 # ----------------------------------------------------------------------------
 # Local staging space guide (non-blocking - never prompts, never checks the
@@ -1192,11 +1238,16 @@ $pumpTimer.Add_Tick({
                 elseif ($m.Cancelled) { Add-LogLine "Cancelled: $($m.Ok) file(s) transferred before stopping; temp cleaned up." 'WARN'; $ctrl.LblXfer.Text = "Cancelled ($($m.Ok) transferred)"; $endText = "Cancelled - $($m.Ok) file(s) transferred" }
                 elseif ($m.Fail) { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'WARN'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950ErrorSound }
                 else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound }
+                if ($m.Destination -and $m.Files -and @($m.Files).Count -gt 0) {
+                    Add-LogLine "Destination: $($m.Destination)" 'STEP'
+                    foreach ($fn in @($m.Files)) { Add-LogLine "  -> $fn" 'OK' }
+                }
                 $ctrl.LblStage.Text = 'No job running'; $ctrl.BarJob.IsIndeterminate = $false; $ctrl.BarJob.Value = 0; $ctrl.LblJob.Text = ''
                 $ctrl.BarXfer.IsIndeterminate = $false; $ctrl.BarXfer.Value = 0
                 $script:LastJobStaging = if ($m.Staging) { $m.Staging } else { $null }
                 if ($P) {
-                    $P.Status.Text = $endText; $P.Title.Text = 'Transfer finished'
+                    $P.Status.Text = if ($m.Destination) { "$endText   |   Destination: $($m.Destination)" } else { $endText }
+                    $P.Title.Text = 'Transfer finished'
                     $P.Stage.Text = 'Done'; $P.BarJob.IsIndeterminate = $false; $P.BarJob.Value = 0
                     $P.BarXfer.IsIndeterminate = $false; $P.BarXfer.Value = 0
                     $P.Cancel.IsEnabled = $false
@@ -1279,7 +1330,10 @@ WORKFLOW
      each one's sub-folders and files are included automatically) and
      "Add Files..." (multi-select file picker, for individual files). Both
      add to the list rather than replacing it. Remove an item with its own
-     "Remove" button, or clear everything with "Clear Selection".
+     "Remove" button, or clear everything with "Clear Selection". Picking a
+     drive from the "Source drive" dropdown also opens a folder browser
+     rooted at that drive - useful for local drives and external HDDs too,
+     not just USB sticks.
      If "Select all folders/files by default" is on in Options, plugging in
      a USB drive adds the whole drive to the selection automatically.
   2. Fill in a CMS case (starts with '$($config.CasePrefix)') and/or an OP NAME
@@ -1289,6 +1343,16 @@ WORKFLOW
      and OP name are entered, both are used.
   3. Press "Start Capture" and confirm the summary (which lists the folders, the
      destination and the zip names).
+  4. When the job finishes, the Activity Log (and the transfer-finished popup)
+     shows the destination path and the name of every file written there.
+
+SLOW MACHINE MODE
+  Click "Slow Machine: OFF" in the header to turn it ON for an old or
+  low-spec machine. It stops the System Monitor's polling outright (rather
+  than just slowing it down) and forces single-threaded, store-only (no
+  compression math) 7-Zip, regardless of the Level/format set in Options -
+  trading speed and archive size for the smallest possible CPU/RAM load.
+  Hashing, the manifest and verification are unaffected.
 
 QUICK TRANSFER
   The "Quick Transfer" button applies the fastest possible settings: store (no
@@ -1378,7 +1442,20 @@ See README.md and docs\USER_GUIDE.md for full documentation.
 # ----------------------------------------------------------------------------
 $ctrl.BtnRefresh.Add_Click({ Update-DriveList; Add-LogLine 'Drives rescanned.' 'INFO' })
 $ctrl.BtnToggleOptions.Add_Click({ Toggle-OptionsPanel })
+$ctrl.BtnSlowMachine.Add_Click({ Set-SlowMachineMode -On (-not $script:SlowMachineMode) })
 $ctrl.BtnDriveRefresh.Add_Click({ Update-DriveList; Add-LogLine 'Drives refreshed.' 'INFO' })
+$ctrl.CmbDrive.Add_SelectionChanged({
+    # Only react to the operator manually picking a drive - not to
+    # Update-DriveList setting the list/selection programmatically (startup,
+    # Rescan/Refresh Drives, USB insert).
+    if ($script:SuppressDriveBrowse) { return }
+    $root = Get-SelectedDriveRoot
+    if (-not $root) { return }
+    $picked = Select-Folder -Description "Select a folder or sub-folder on $root to add (all sub-folders and files are included)" -Start "$root\"
+    if (-not $picked) { return }
+    if (Add-SelectedItem -Path $picked -IsFolder $true) { Add-LogLine "Added from ${root}: $picked" 'OK' }
+    else { Add-LogLine "Folder already in the selection: $picked" 'WARN' }
+})
 $ctrl.BtnBrowseFolder.Add_Click({ Add-BrowsedFolder })
 $ctrl.BtnBrowseFiles.Add_Click({ Add-BrowsedFiles })
 $ctrl.BtnHelp.Add_Click({ Show-Help })
@@ -1419,7 +1496,8 @@ $window.Add_Loaded({
     Update-Footer
     Update-NamePreview
     Register-UsbWatcher
-    $statsTimer.Start(); $pumpTimer.Start(); $usbTimer.Start()
+    $pumpTimer.Start(); $usbTimer.Start()
+    Set-SlowMachineMode -On ([bool]$config.SlowMachineMode)   # also starts/skips statsTimer as appropriate
     Add-LogLine "Auto 49/50 v$script:AppVersion ready." 'OK'
     if (-not (Resolve-SevenZip -PreferredPath $config.SevenZipPath)) {
         Add-LogLine '7-Zip not found. Install it (https://www.7-zip.org) or set the 7-Zip path in Options.' 'ERROR'
