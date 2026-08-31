@@ -45,9 +45,9 @@ detects this and will tell you.
 ├ System Monitor ─┬ Details + Selection ─┬ Options ───────────┬ Activity Log ────────┤
 │ CPU             │ CMS Case Number      │ Destination         │ [09:31:02] ...        │
 │ Memory          │ OP Name (UPPERCASE)  │ Format / Split size │ colour-coded          │
-│ Network Mbps    │ ☑ Auto-transfer      │ Level / Hashing     │ events                │
-│ Temp free space │ Drive ▼ [Sel][Desel] │ ...all options...   │                       │
-│ Job progress    │ ☑ Photos  ☑ report   │ [ Save Options ]    │                       │
+│ Network Mbps    │ Pass Number          │ Level / Hashing     │ events                │
+│ Temp free space │ Drive ▼ [Refresh]    │ ...all options...   │                       │
+│ Job progress    │ [Browse][Add Files]  │ [ Save Options ]    │                       │
 ├─────────────────┴──────────────────────┴─────────────────────┴───────────────────────┤
 │ Destination: C:\Destination...        [Start Capture]  [Cancel]                       │
 └─────────────────────────────────────────────────────────────────────────────────────┘
@@ -102,19 +102,14 @@ UI.
   There is no destination sub-folder - see "Destination naming" below. Each
   hint highlights until its value is valid.
 
-### Auto-transfer
-- Tick **"Auto-transfer when a USB drive is plugged in"** to start the capture
-  automatically on insert, with **no prompts**. It only requires that a valid
-  **CMS case or OP name** is already entered; if neither is set you're asked to
-  add one. All currently-selected folders/files (all by default) are captured.
-
 ### Options panel (all settings, on the main screen)
 Everything is editable on the right-hand **Options** panel — destination,
 7-Zip path, staging folder, case prefix, **archive format**, **volume/split
 size (sizing)**, compression level, password, hashing, manifest embedding,
 verification, prompt-on-insert, select-all default and exclude
 patterns. Changes apply immediately when you press **Start**; **Save Options**
-writes them to `config.json`. Every checkbox can be ticked *and* un-ticked.
+writes them to `config.json` and then hides the Options panel. Every checkbox
+can be ticked *and* un-ticked.
 
 **Combined archive** — every folder/file you select is always packed into a
 **single** archive (this is fixed behavior, not a setting): one shared
@@ -135,15 +130,14 @@ ever colliding at the destination, without needing a folder per case.
 
 1. **Connect the USB drive** — it becomes available in the "Source drive"
    list, and (with "Select all folders/files by default" on) is added to the
-   selection automatically. With prompt-on-insert on (and auto-transfer off)
-   a **Yes/No** dialog appears.
+   selection automatically. With prompt-on-insert on, a **Yes/No** dialog
+   appears.
 2. Build/adjust the **selection** with Browse Folders.../Add Files... and
    enter a **CMS case and/or OP name**
    (at least one is required), plus an optional **pass number**.
 3. Click **Start Capture**. The tool logs a **staging space guide** (see
-   below) and, unless auto-transfer is on, shows a confirm summary dialog
-   listing every selected item's full source path, the destination folder and
-   the resulting archive names.
+   below) and shows a confirm summary dialog listing every selected item's
+   full source path, the destination folder and the resulting archive names.
 4. A **"Transfer in progress"** window opens, mirroring the activity log and
    showing compress/transfer progress and a running transferred-file count.
 5. Watch the **activity log**:
@@ -155,12 +149,12 @@ Before the job starts, the tool sums the size of your selected items,
 estimates the compressed size at your current settings, and logs that against
 the free space in the **local staging folder only** — the destination is
 never checked here, so a slow link never adds delay before a job can start.
-This is a **guide, not a gate**: it never prompts and never blocks, under
-auto-transfer or a manual start alike. If it looks tight, a warning is logged
-and the job proceeds automatically regardless, since parts stream out to the
-destination as soon as each is written rather than needing to fit all at
-once. It's a **planning estimate only**: already-compressed data (photos,
-video, zip/7z files) shrinks far less than typical documents.
+This is a **guide, not a gate**: it never prompts and never blocks. If it
+looks tight, a warning is logged and the job proceeds automatically
+regardless, since parts stream out to the destination as soon as each is
+written rather than needing to fit all at once. It's a **planning estimate
+only**: already-compressed data (photos, video, zip/7z files) shrinks far
+less than typical documents.
 
 ### What happens internally
 1. **Hash** every original file across your whole selection → one manifest
@@ -265,8 +259,7 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Archive password | Optional AES-256 (encrypts headers too on `7z`) |
 | Hash SHA-256 / MD5 | Which hashes to compute |
 | Embed manifest | Include the manifest inside each archive |
-| Prompt on insert | Show the Yes/No dialog automatically (when auto-transfer is off) |
-| Auto-transfer | Start automatically on insert; needs a CMS case or OP name |
+| Prompt on insert | Show the Yes/No dialog automatically on USB insert |
 | Select all by default | On USB insert, add the whole drive to the selection automatically |
 | Verify after transfer | Re-hash the archive at the destination |
 | Exclude patterns | Names to skip when compressing (e.g. `System Volume Information`) |

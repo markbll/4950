@@ -33,12 +33,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 
 # P/Invoke used solely to enlarge the native Windows folder/file-picker dialogs
 # (System.Windows.Forms.FolderBrowserDialog / OpenFileDialog expose no
-# Width/Height property of their own) - see Show-EnlargedDialog below. Also
-# defines the COM shell interfaces behind the native multi-select FOLDER
-# picker (IFileOpenDialog with FOS_PICKFOLDERS|FOS_ALLOWMULTISELECT) - see
-# Select-MultipleFolders below. Standard shobjidl.idl vtable layout; every
-# method must stay declared in its exact original order even if unused here,
-# since COM interop dispatches by vtable slot position, not by name.
+# Width/Height property of their own) - see Show-EnlargedDialog below.
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -51,100 +46,6 @@ namespace Auto4950 {
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     }
-
-    [Flags]
-    public enum FOS : uint {
-        FOS_OVERWRITEPROMPT = 0x2, FOS_STRICTFILETYPES = 0x4, FOS_NOCHANGEDIR = 0x8,
-        FOS_PICKFOLDERS = 0x20, FOS_FORCEFILESYSTEM = 0x40, FOS_ALLNONSTORAGEITEMS = 0x80,
-        FOS_NOVALIDATE = 0x100, FOS_ALLOWMULTISELECT = 0x200, FOS_PATHMUSTEXIST = 0x800,
-        FOS_FILEMUSTEXIST = 0x1000, FOS_CREATEPROMPT = 0x2000, FOS_SHAREAWARE = 0x4000,
-        FOS_NOREADONLYRETURN = 0x8000, FOS_NOTESTFILECREATE = 0x10000, FOS_HIDEMRUPLACES = 0x20000,
-        FOS_HIDEPINNEDPLACES = 0x40000, FOS_NODEREFERENCELINKS = 0x100000, FOS_OKBUTTONNEEDSINTERACTION = 0x200000,
-        FOS_DONTADDTORECENT = 0x2000000, FOS_FORCESHOWHIDDEN = 0x10000000, FOS_DEFAULTNOMINIMODE = 0x20000000,
-        FOS_FORCEPREVIEWPANEON = 0x40000000, FOS_SUPPORTSTREAMABLEITEMS = 0x80000000
-    }
-    public enum SIGDN : uint { SIGDN_FILESYSPATH = 0x80058000 }
-
-    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IShellItem {
-        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
-        void GetParent(out IShellItem ppsi);
-        void GetDisplayName(SIGDN sigdnName, out IntPtr ppszName);
-        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
-        void Compare(IShellItem psi, uint hint, out int piOrder);
-    }
-
-    [ComImport, Guid("b63ea76d-1f85-456f-a19c-48159efa858b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IShellItemArray {
-        void BindToHandler(IntPtr pbc, ref Guid rbhid, ref Guid riid, out IntPtr ppvOut);
-        void GetPropertyStore(int flags, ref Guid riid, out IntPtr ppv);
-        void GetPropertyDescriptionList(IntPtr keyType, ref Guid riid, out IntPtr ppv);
-        void GetAttributes(int AttribFlags, uint sfgaoMask, out uint psfgaoAttribs);
-        void GetCount(out uint pdwNumItems);
-        void GetItemAt(uint dwIndex, out IShellItem ppsi);
-        void EnumItems(out IntPtr ppenumShellItems);
-    }
-
-    [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IFileDialog {
-        [PreserveSig] uint Show(IntPtr parent);
-        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
-        void SetFileTypeIndex(uint iFileType);
-        void GetFileTypeIndex(out uint piFileType);
-        void Advise(IntPtr pfde, out uint pdwCookie);
-        void Unadvise(uint dwCookie);
-        void SetOptions(FOS fos);
-        void GetOptions(out FOS pfos);
-        void SetDefaultFolder(IShellItem psi);
-        void SetFolder(IShellItem psi);
-        void GetFolder(out IShellItem ppsi);
-        void GetCurrentSelection(out IShellItem ppsi);
-        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
-        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
-        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
-        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
-        void GetResult(out IShellItem ppsi);
-        void AddPlace(IShellItem psi, int alignment);
-        void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
-        void Close(int hr);
-        void SetClientGuid(ref Guid guid);
-        void ClearClientData();
-        void SetFilter(IntPtr pFilter);
-    }
-
-    [ComImport, Guid("d57c7288-d4ad-4768-be02-9d969532d960"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IFileOpenDialog {
-        [PreserveSig] uint Show(IntPtr parent);
-        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
-        void SetFileTypeIndex(uint iFileType);
-        void GetFileTypeIndex(out uint piFileType);
-        void Advise(IntPtr pfde, out uint pdwCookie);
-        void Unadvise(uint dwCookie);
-        void SetOptions(FOS fos);
-        void GetOptions(out FOS pfos);
-        void SetDefaultFolder(IShellItem psi);
-        void SetFolder(IShellItem psi);
-        void GetFolder(out IShellItem ppsi);
-        void GetCurrentSelection(out IShellItem ppsi);
-        void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-        void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
-        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
-        void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
-        void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
-        void GetResult(out IShellItem ppsi);
-        void AddPlace(IShellItem psi, int alignment);
-        void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
-        void Close(int hr);
-        void SetClientGuid(ref Guid guid);
-        void ClearClientData();
-        void SetFilter(IntPtr pFilter);
-        void GetResults(out IShellItemArray ppenum);
-        void GetSelectedItems(out IShellItemArray ppsai);
-    }
-
-    [ComImport, Guid("dc1c5a9c-e88a-4dde-a5a1-60f82a20aef7")]
-    public class FileOpenDialogRCW { }
 }
 '@
 
@@ -300,7 +201,6 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
@@ -328,24 +228,21 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
           <TextBlock Grid.Row="2" x:Name="LblNamePreview" Text="File name: (enter a CMS case or OP name)"
                      Foreground="{StaticResource Muted}" FontStyle="Italic" Margin="0,6,0,0" TextWrapping="Wrap"/>
 
-          <CheckBox Grid.Row="3" x:Name="ChkAuto" Margin="0,8,0,0"
-                    Content="Auto-transfer when a USB drive is plugged in (needs CMS case or OP name)"/>
-
-          <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,4">
+          <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,4">
             <TextBlock Text="Source drive:" VerticalAlignment="Center" Margin="0,0,6,0"/>
             <ComboBox x:Name="CmbDrive" Width="200" Foreground="#FF202020" VerticalAlignment="Center"/>
             <Button x:Name="BtnDriveRefresh" Content="Refresh Drives"/>
           </StackPanel>
 
-          <StackPanel Grid.Row="5" Margin="0,0,0,4">
+          <StackPanel Grid.Row="4" Margin="0,0,0,4">
             <StackPanel Orientation="Horizontal">
               <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="#FF202020"/>
               <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="#FF202020"/>
             </StackPanel>
-            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick several at once - Ctrl/Shift-click; sub-folders are included automatically) or Add Files for individual files (also multi-select)." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick one, then choose to add another; sub-folders are included automatically) or Add Files for individual files (multi-select)." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
 
-          <Grid Grid.Row="6" Margin="0,2,0,2">
+          <Grid Grid.Row="5" Margin="0,2,0,2">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Selection:" FontWeight="Bold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
@@ -353,12 +250,12 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
             </StackPanel>
           </Grid>
 
-          <Border Grid.Row="7" Background="#FF20202A" CornerRadius="6" Margin="0,4">
+          <Border Grid.Row="6" Background="#FF20202A" CornerRadius="6" Margin="0,4">
             <ListBox x:Name="LstItems" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
           </Border>
 
-          <TextBlock Grid.Row="8" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
+          <TextBlock Grid.Row="7" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
         </Grid>
       </Border>
 
@@ -422,7 +319,7 @@ $script:LastJobStaging = $null   # local staging folder of the last completed jo
 
               <Separator Margin="0,6"/>
               <TextBlock Text="BEHAVIOUR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,4"/>
-              <CheckBox x:Name="OptPrompt"     Content="Prompt on USB insert (when auto-transfer is off)"/>
+              <CheckBox x:Name="OptPrompt"     Content="Prompt on USB insert"/>
               <CheckBox x:Name="OptSelDefault" Content="Select all folders/files by default"/>
               <TextBlock Text="Local copies (in the staging folder) are always kept until you delete them - manually, or via &quot;Delete Local Copies&quot; on the transfer-finished window." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,4"/>
               <TextBlock Text="Exclude patterns (comma separated)"/>
@@ -577,11 +474,12 @@ function Get-SelectedDriveRoot {
 
 # ----------------------------------------------------------------------------
 # Selection: a flat list of top-level folders/files, built entirely from the
-# native Windows multi-select dialogs (Select-MultipleFolders / OpenFileDialog)
-# rather than an in-app checkbox tree - navigating to a specific deep
-# sub-folder is just normal Explorer navigation inside the dialog, with no
-# custom UI to expand level by level. A folder entry is captured recursively,
-# in full, at capture time - exactly as a checked folder used to be.
+# standard Windows folder/file browser dialogs (FolderBrowserDialog, looped
+# for multiple folders / OpenFileDialog with Multiselect for files) rather
+# than an in-app checkbox tree - navigating to a specific deep sub-folder is
+# just normal Explorer navigation inside the dialog, with no custom UI to
+# expand level by level. A folder entry is captured recursively, in full, at
+# capture time - exactly as a checked folder used to be.
 # ----------------------------------------------------------------------------
 $script:SelectedItems = New-Object System.Collections.Generic.List[object]   # [pscustomobject]@{ Path; IsFolder }
 
@@ -667,15 +565,18 @@ function Clear-Selection {
 }
 
 function Add-BrowsedFolder {
-    # Primary way to build the selection: the native multi-select Windows
-    # folder picker. Each picked folder is captured recursively, in full, at
-    # capture time - the same as a checked top-level folder used to be.
-    $picked = @(Select-MultipleFolders -Title 'Select source folder(s) to add (all sub-folders and files are included)')
-    if ($picked.Count -eq 0) { return }
+    # Standard Windows folder browser dialog (one folder per pick), looped so
+    # several folders can still be added in one flow. Each picked folder is
+    # captured recursively, in full, at capture time - the same as a checked
+    # top-level folder used to be.
     $added = 0
-    foreach ($p in $picked) {
-        if (Add-SelectedItem -Path $p -IsFolder $true) { $added++ }
-        else { Add-LogLine "Folder already in the selection: $p" 'WARN' }
+    while ($true) {
+        $picked = Select-Folder -Description 'Select a source folder to add (all sub-folders and files are included)'
+        if (-not $picked) { break }
+        if (Add-SelectedItem -Path $picked -IsFolder $true) { $added++ }
+        else { Add-LogLine "Folder already in the selection: $picked" 'WARN' }
+        $more = [System.Windows.MessageBox]::Show('Add another folder?', 'Browse Folders', 'YesNo', 'Question')
+        if ($more -ne 'Yes') { break }
     }
     if ($added -gt 0) { Add-LogLine "$added folder(s) added to selection." 'OK' }
 }
@@ -711,7 +612,6 @@ function Set-OptionsFromConfig {
     $ctrl.OptVerify.IsChecked     = [bool]$config.VerifyAfterTransfer
     $ctrl.OptPrompt.IsChecked     = [bool]$config.AutoPromptOnInsert
     $ctrl.OptSelDefault.IsChecked = [bool]$config.DefaultSelectAll
-    $ctrl.ChkAuto.IsChecked       = [bool]$config.AutoTransfer
     $ctrl.OptExcl.Text            = ($config.ExcludePatterns -join ', ')
     foreach ($it in $ctrl.OptFormat.Items) { if ($it.Content -eq $config.ArchiveFormat) { $ctrl.OptFormat.SelectedItem = $it } }
 }
@@ -732,7 +632,6 @@ function Sync-OptionsToConfig {
     $config.VerifyAfterTransfer = [bool]$ctrl.OptVerify.IsChecked
     $config.AutoPromptOnInsert  = [bool]$ctrl.OptPrompt.IsChecked
     $config.DefaultSelectAll    = [bool]$ctrl.OptSelDefault.IsChecked
-    $config.AutoTransfer        = [bool]$ctrl.ChkAuto.IsChecked
     $config.ExcludePatterns     = @($ctrl.OptExcl.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $config.Password            = $ctrl.OptPwd.Password
     $script:Shared.Config       = $config
@@ -744,6 +643,7 @@ function Save-Options {
     Update-Footer
     Add-LogLine 'Options saved to config.json.' 'OK'
     if ($config.Password) { Add-LogLine 'Archive password set (avoid storing sensitive passwords in plain config).' 'WARN' }
+    Hide-OptionsPanel
 }
 
 # ----------------------------------------------------------------------------
@@ -804,78 +704,6 @@ function Select-Folder {
     if ($Start -and (Test-Path -LiteralPath $Start)) { $dlg.SelectedPath = $Start }
     if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
     return $null
-}
-
-function Select-MultipleFolders {
-    <#
-    .SYNOPSIS Native Windows folder picker that allows selecting MULTIPLE
-              folders in one dialog (System.Windows.Forms.FolderBrowserDialog
-              only ever allows one).
-    .DESCRIPTION
-        This is the same modern Explorer-style dialog used throughout
-        Windows, via IFileOpenDialog with FOS_PICKFOLDERS + FOS_ALLOWMULTISELECT
-        - not a custom-built window. Applies the same enlarge-on-open
-        behaviour as Show-EnlargedDialog (which can't be reused directly
-        here since this isn't a System.Windows.Forms.CommonDialog).
-    .OUTPUTS string[] of the selected folder paths - empty if cancelled.
-    #>
-    param([string]$Title = 'Select folder(s)')
-
-    $dlg = New-Object Auto4950.FileOpenDialogRCW
-    $paths = @()
-    try {
-        $ifd = [Auto4950.IFileOpenDialog]$dlg
-        $ifd.SetOptions([Auto4950.FOS]::FOS_PICKFOLDERS -bor [Auto4950.FOS]::FOS_FORCEFILESYSTEM `
-            -bor [Auto4950.FOS]::FOS_ALLOWMULTISELECT -bor [Auto4950.FOS]::FOS_PATHMUSTEXIST)
-        $ifd.SetTitle($Title)
-
-        $mainHwnd = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
-        $myPid    = [System.Diagnostics.Process]::GetCurrentProcess().Id
-        $timer = New-Object System.Windows.Forms.Timer
-        $timer.Interval = 100
-        $timer.Add_Tick({
-            $hwnd = [Auto4950.NativeDialog]::GetForegroundWindow()
-            if ($hwnd -eq [IntPtr]::Zero -or $hwnd -eq $mainHwnd) { return }
-            $tpid = 0
-            [void][Auto4950.NativeDialog]::GetWindowThreadProcessId($hwnd, [ref]$tpid)
-            if ($tpid -ne $myPid) { return }
-            $rect = New-Object Auto4950.RECT
-            if ([Auto4950.NativeDialog]::GetWindowRect($hwnd, [ref]$rect)) {
-                $w = $rect.Right - $rect.Left; $h = $rect.Bottom - $rect.Top
-                $minW = 1000; $minH = 680
-                if ($w -lt $minW -or $h -lt $minH) {
-                    [void][Auto4950.NativeDialog]::SetWindowPos($hwnd, [IntPtr]::Zero, $rect.Left, $rect.Top, [Math]::Max($w, $minW), [Math]::Max($h, $minH), 0x0004)
-                }
-            }
-            $timer.Stop()
-        }.GetNewClosure())
-        $timer.Start()
-        $hr = 0
-        try { $hr = $ifd.Show($mainHwnd) } finally { $timer.Stop(); $timer.Dispose() }
-        if ($hr -ne 0) { return @() }   # non-zero HRESULT: cancelled (0x800704C7) or an error - either way, nothing picked
-
-        $results = $null
-        $ifd.GetResults([ref]$results)
-        try {
-            $count = 0
-            $results.GetCount([ref]$count)
-            for ($i = 0; $i -lt $count; $i++) {
-                $item = $null
-                $results.GetItemAt($i, [ref]$item)
-                try {
-                    $namePtr = [IntPtr]::Zero
-                    $item.GetDisplayName([Auto4950.SIGDN]::SIGDN_FILESYSPATH, [ref]$namePtr)
-                    if ($namePtr -ne [IntPtr]::Zero) {
-                        $paths += [System.Runtime.InteropServices.Marshal]::PtrToStringUni($namePtr)
-                        [System.Runtime.InteropServices.Marshal]::FreeCoTaskMem($namePtr)
-                    }
-                } finally { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) }
-            }
-        } finally { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($results) }
-    } finally {
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($dlg)
-    }
-    return $paths
 }
 
 function Select-SevenZipFile {
@@ -980,10 +808,9 @@ function Update-Footer {
     $sz = Resolve-SevenZip -PreferredPath $config.SevenZipPath
     if (-not $sz) { $sz = 'NOT FOUND' }
     $split = if ([int]$config.VolumeSizeMB -gt 0) { "Split: $([int]$config.VolumeSizeMB) MB" } else { 'Split: off' }
-    $auto  = if ($config.AutoTransfer) { 'Auto: ON' } else { 'Auto: off' }
     $hash  = if ($config.EmbedManifest) { "Hash:$($config.HashAlgorithms -join '+')" } else { 'Hash:OFF' }
     $vfy   = if ($config.VerifyAfterTransfer) { 'Verify:on' } else { 'Verify:off' }
-    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $($config.ArchiveFormat)  L$($config.CompressionLevel)  $split  $hash  $vfy   |   $auto"
+    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $($config.ArchiveFormat)  L$($config.CompressionLevel)  $split  $hash  $vfy"
 }
 
 # ----------------------------------------------------------------------------
@@ -1109,6 +936,10 @@ function Toggle-OptionsPanel {
         $ctrl.PanelOptions.Visibility = 'Collapsed'
         $ctrl.BtnToggleOptions.Content = 'Show Options'
     }
+}
+
+function Hide-OptionsPanel {
+    if ($script:OptionsVisible) { Toggle-OptionsPanel }
 }
 
 # ----------------------------------------------------------------------------
@@ -1294,7 +1125,9 @@ function Complete-Capture {
 # Timers: system stats, worker message pump, USB-event pump
 # ----------------------------------------------------------------------------
 $statsTimer = New-Object System.Windows.Threading.DispatcherTimer
-$statsTimer.Interval = [TimeSpan]::FromMilliseconds(1500)
+# 3s rather than 1.5s: the System Monitor panel is a coarse indicator, not a
+# live meter, and this halves the CPU spent polling WMI/CIM for it.
+$statsTimer.Interval = [TimeSpan]::FromMilliseconds(3000)
 $statsTimer.Add_Tick({
     $stagePath = Expand-A4950Path $config.StagingFolder
     $tempQualifier = try { Split-Path -Qualifier $stagePath } catch { $env:SystemDrive }
@@ -1402,22 +1235,7 @@ $usbTimer.Add_Tick({
         $ctrl.StatusLine.Text = "USB drive $drive connected and scanned."
         if ($script:Shared.Running) { continue }
 
-        if ($ctrl.ChkAuto.IsChecked) {
-            # Auto-transfer: only needs a valid CMS case OR OP name.
-            $tn = Get-TransferName
-            if ($tn.Ok) {
-                Add-LogLine "Auto-transfer: starting '$($tn.Name)' ($($tn.Kind)) from $drive." 'STEP'
-                Start-Capture -NoConfirm
-            } else {
-                $window.Activate()
-                Add-LogLine "Auto-transfer is ON but needs an identifier. $($tn.Reason)" 'WARN'
-                [System.Windows.MessageBox]::Show(
-                    "USB drive $drive connected and scanned.`n`nAuto-transfer is ON but needs a CMS case or OP name.`n`n$($tn.Reason)",
-                    'Auto-transfer - identifier needed', 'OK', 'Warning') | Out-Null
-                if ($ctrl.TxtCase.Text.Trim() -eq $config.CasePrefix -or -not $ctrl.TxtCase.Text.Trim()) { $ctrl.TxtCase.Focus(); $ctrl.TxtCase.SelectAll() }
-            }
-        }
-        elseif ($ctrl.OptPrompt.IsChecked) {
+        if ($ctrl.OptPrompt.IsChecked) {
             $window.Activate()
             $resp = [System.Windows.MessageBox]::Show(
                 "A USB drive ($drive) has been connected and scanned.`n`nReview the folders/files in the middle panel and choose what to transfer.`n`nEnter a CMS case or OP name and start now?",
@@ -1456,9 +1274,9 @@ function Show-Help {
 Auto 49/50  (version $script:AppVersion) - USB Compression & Transfer Tool
 
 WORKFLOW
-  1. Build the selection using "Browse Folders..." (native multi-select
-     Windows folder picker - pick several folders at once with Ctrl/Shift-
-     click; each one's sub-folders and files are included automatically) and
+  1. Build the selection using "Browse Folders..." (standard Windows folder
+     picker - pick one folder at a time, then choose "Yes" to add another;
+     each one's sub-folders and files are included automatically) and
      "Add Files..." (multi-select file picker, for individual files). Both
      add to the list rather than replacing it. Remove an item with its own
      "Remove" button, or clear everything with "Clear Selection".
@@ -1503,12 +1321,6 @@ TEMP CLEANUP
   -finished window, which prompts you to confirm first. (A cancelled job's
   partial output IS still cleaned up automatically, since it has no
   evidentiary value.)
-
-AUTO-TRANSFER
-  Tick "Auto-transfer when a USB drive is plugged in". Then, as soon as a drive
-  is connected, the capture starts automatically with NO prompts - it only
-  requires that a valid CMS case and/or OP name is already entered (a pass
-  number alone is not enough). If neither is set you'll be asked to provide one.
 
 COMBINED ARCHIVE
   All selected folders/files are always packed into ONE combined archive (this

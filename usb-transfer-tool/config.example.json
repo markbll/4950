@@ -9,7 +9,6 @@
   "HashAlgorithms": ["SHA256", "MD5"],
   "EmbedManifest": true,
   "AutoPromptOnInsert": true,
-  "AutoTransfer": false,
   "DefaultSelectAll": true,
   "VerifyAfterTransfer": true,
   "StagingFolder": "C:\\temp",

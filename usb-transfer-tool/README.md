@@ -17,8 +17,7 @@ optional pass number.
 |---|---|
 | Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is detected on insert |
 | Prompt before acting | Yes/No dialog on insert (`AutoPromptOnInsert`), plus a final confirm |
-| Auto-transfer | Tick-box: start automatically on insert, needing only a CMS case **and/or** OP name (pass number alone is not enough) |
-| Choose folders/files | Built entirely from **native Windows multi-select dialogs** - **Browse Folders...** (pick several folders in one dialog; each captured recursively, in full) and **Add Files...** (pick several individual files) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
+| Choose folders/files | Built entirely from standard Windows dialogs - **Browse Folders...** (folder browser, looped so several folders can be added in one flow; each captured recursively, in full) and **Add Files...** (multi-select file picker) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
 | Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
 | Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
@@ -104,13 +103,11 @@ powershell -ExecutionPolicy Bypass -File .\Start-Auto4950.ps1
 Or right-click either `.ps1` and choose **Run with PowerShell**.
 
 1. Connect a USB drive → it's detected and available in the "Source drive" list.
-2. Click **Browse Folders...** and/or **Add Files...** to build the selection from
-   the native Windows multi-select picker (or leave "Select all folders/files by
-   default" on in Options to add the whole drive automatically on insert).
+2. Click **Browse Folders...** and/or **Add Files...** to build the selection
+   (or leave "Select all folders/files by default" on in Options to add the
+   whole drive automatically on insert).
 3. Enter **either** a CMS case (e.g. `CMS-A12345`) **or** an **UPPERCASE** OP name.
-4. Click **Start Capture** and confirm — or tick **Auto-transfer** to skip the
-   prompts and start automatically whenever a drive is plugged in (it just needs
-   a CMS case or OP name to already be filled in).
+4. Click **Start Capture** and confirm the summary.
 
 All options — including **sizing/volume split** — live in the **Options** panel on
 the main screen; **Save Options** persists them.
@@ -177,7 +174,6 @@ See `config.example.json`. Key settings:
 - **CompressionLevel** — `0` (store, fastest) … `9` (ultra, smallest).
 - **HashAlgorithms** — any of `SHA256`, `MD5`.
 - **VerifyAfterTransfer** — re-hash the archive at the destination.
-- **AutoTransfer** — start automatically on USB insert (needs a CMS case or OP name).
 - **StagingFolder** — local temp area for archives before transfer, default `C:\temp`.
   Local copies are **always kept** here after a completed job - there's no
   auto-delete setting. Remove them manually, or via **Delete Local Copies** on
@@ -196,11 +192,10 @@ settings, then checks that estimate against the free space available in the
 here — over a slow link that round-trip just adds delay before the job can
 even start, for a number that's advisory at best.
 
-This is a **guide, not a gate**: it never blocks and never prompts, in either
-Auto-transfer or a manual start. If it looks tight, a warning is logged and
-the job proceeds automatically regardless — parts stream out to the
-destination as soon as each is written, so staging was never going to need to
-hold the whole archive at once anyway.
+This is a **guide, not a gate**: it never blocks and never prompts. If it
+looks tight, a warning is logged and the job proceeds automatically
+regardless — parts stream out to the destination as soon as each is written,
+so staging was never going to need to hold the whole archive at once anyway.
 
 The compression estimate is a **planning heuristic only** — real compression is
 entirely data-dependent. Already-compressed media (photos, video, most zip/7z

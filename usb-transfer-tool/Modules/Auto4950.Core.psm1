@@ -43,7 +43,6 @@ function Get-DefaultConfig {
         EmbedManifest       = $true                    # Include hash manifest inside each archive
         # --- Behaviour ---------------------------------------------------------
         AutoPromptOnInsert  = $true                    # Show the action prompt when a USB drive appears
-        AutoTransfer        = $false                   # Start automatically on insert if a CMS case / OP name is set
         DefaultSelectAll    = $true                    # Pre-select all folders/files by default
         VerifyAfterTransfer = $true                    # Re-hash the archive at destination
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
@@ -561,13 +560,39 @@ function Get-A4950FileHashes {
         [Parameter(Mandatory)][string]$Path,
         [string[]]$Algorithms = @('SHA256', 'MD5')
     )
+    # Single-pass streaming hash: when SHA-256 and MD5 are both requested
+    # (the default), reading the file once and feeding both hashers per
+    # chunk avoids reading a large file from disk twice.
     $out = @{}
+    $hashers = @{}
     foreach ($alg in $Algorithms) {
-        try {
-            $out[$alg] = (Get-FileHash -LiteralPath $Path -Algorithm $alg).Hash
-        } catch {
-            $out[$alg] = "ERROR: $($_.Exception.Message)"
+        $hashers[$alg] = switch ($alg) {
+            'SHA256' { [System.Security.Cryptography.SHA256]::Create() }
+            'MD5'    { [System.Security.Cryptography.MD5]::Create() }
+            default  { [System.Security.Cryptography.HashAlgorithm]::Create($alg) }
         }
+    }
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $buffer = New-Object byte[] 1MB
+            $read = 0
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                foreach ($h in $hashers.Values) { $h.TransformBlock($buffer, 0, $read, $null, 0) | Out-Null }
+            }
+            $empty = [byte[]]::new(0)
+            foreach ($h in $hashers.Values) { $h.TransformFinalBlock($empty, 0, 0) | Out-Null }
+            foreach ($alg in $Algorithms) {
+                $out[$alg] = [System.BitConverter]::ToString($hashers[$alg].Hash).Replace('-', '')
+            }
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        $msg = "ERROR: $($_.Exception.Message)"
+        foreach ($alg in $Algorithms) { $out[$alg] = $msg }
+    } finally {
+        foreach ($h in $hashers.Values) { $h.Dispose() }
     }
     return $out
 }
