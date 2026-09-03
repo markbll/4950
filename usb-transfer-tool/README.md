@@ -34,6 +34,7 @@ optional pass number.
 | Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
 | Transfer starts as soon as it's ready | For a split `zip`, each volume (`.001`, `.002`, …) begins transferring the instant it's fully written, in parallel with compression of the next volume — no need to wait for the rest. `7z` volumes and unsplit archives transfer once the whole file is confirmed complete |
+| `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — every other volume still transfers the moment it's ready. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
 | Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
@@ -137,6 +138,12 @@ C:\Destination\
 > complete archive first and then splits it itself into `.001`/`.002`/… parts
 > (the same raw sequential-byte layout 7-Zip's own volumes use), so the split
 > size setting works for **both** archive formats.
+>
+> `.001` is always the LAST volume to actually arrive at the destination,
+> regardless of compression order — every other volume transfers the moment
+> it's ready, but `.001` is deliberately held back until they've all been
+> queued. You can't reassemble/open the set without it, so this stops a
+> still-incomplete transfer from looking usable.
 
 The archive embeds `CMS-A12345_20260818_143000_MANIFEST.txt` and `.csv`
 listing every original file's size, timestamp and SHA-256 / MD5 hash, with

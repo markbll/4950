@@ -252,17 +252,22 @@ opening the `.001` in 7-Zip, or — without 7-Zip — concatenate the parts in
 order: `copy /b file.001+file.002 file.zip`. Volume file names drop the
 archive extension (`file.001`, not `file.zip.001`).
 
-**Volumes transfer as soon as each one is ready (zip only).** For `zip`, the
-tool writes `.001`, `.002`, … strictly in order — `.001` is completely closed
-before `.002` is even started — so each volume's completion is known exactly,
-and `.001` starts uploading immediately while later volumes are still being
-written. `7z`'s own `-v` volumes don't get this treatment: 7-Zip is a separate
-process, and it does **not** necessarily finish writing its volumes in
-ascending numeric order internally (the first volume file can, in some cases,
-be the *last* one it actually finishes) — so for `7z`, all volumes are only
-picked up for transfer together, once the whole 7-Zip process has exited and
-every volume is confirmed complete. This avoids any risk of transferring a
-volume that looks present on disk but isn't actually finished yet.
+**Volumes transfer as soon as each one is ready (zip only) — except `.001`,
+which is always last.** For `zip`, the tool writes `.001`, `.002`, … strictly
+in order — `.001` is completely closed before `.002` is even started — so
+each volume's completion is known exactly and every volume from `.002`
+onward starts uploading immediately while later volumes are still being
+written. `.001` itself is the one exception: it's deliberately held back and
+only queued for transfer once every other volume already has been. Since the
+set can't be reassembled or opened at the destination without `.001`, this
+means a still-incomplete transfer can never be mistaken for a finished one.
+`7z`'s own `-v` volumes don't get the "transfer the moment it's ready"
+treatment at all: 7-Zip is a separate process, and it does **not**
+necessarily finish writing its volumes in ascending numeric order internally
+(the first volume file can, in some cases, be the *last* one it actually
+finishes) — so for `7z`, all volumes are only picked up for transfer
+together, once the whole 7-Zip process has exited and every volume is
+confirmed complete, with `.001` still sent last within that same batch.
 
 ---
 

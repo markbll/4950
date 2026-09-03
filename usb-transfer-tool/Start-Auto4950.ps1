@@ -1392,6 +1392,13 @@ COMBINED ARCHIVE
   file's entry prefixed by its original top-level folder name so nothing
   collides.
 
+TRANSFER ORDER
+  When the archive is split into volumes, every volume transfers the moment
+  it's ready - EXCEPT .001, which is deliberately held back and only sent
+  once every other volume has already been queued. Since the set can't be
+  reassembled/opened without .001, this means an incomplete transfer at the
+  destination can never look like a finished one.
+
 OPTIONS (all on the main screen, right-hand panel)
   Network share, 7-Zip path, staging folder, case prefix, archive format,
   volume/split size, compression level, password, hashing, manifest embedding,
