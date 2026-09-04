@@ -29,12 +29,12 @@ optional pass number.
 | Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
 | Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password, **multi-threaded** (`-mmt=on`) for both formats |
-| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file |
+| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file. **A split always uses native 7z volumes**, regardless of the configured archive format — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
 | Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Transfer starts as soon as it's ready | For a split `zip`, each volume (`.001`, `.002`, …) begins transferring the instant it's fully written, in parallel with compression of the next volume — no need to wait for the rest. `7z` volumes and unsplit archives transfer once the whole file is confirmed complete |
-| `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — every other volume still transfers the moment it's ready. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
+| Transfer starts as soon as it's ready | Un-split archives transfer once the whole file is confirmed complete. A split archive's volumes are only knowable/complete once 7-Zip's process has fully exited, so all of them are picked up for transfer together right after that — never early |
+| `.001` always transfers last | Within that same batch, whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
 | Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
@@ -123,27 +123,50 @@ timestamp, keeping every job's files unique there:
 
 ```
 C:\Destination\
-    CMS-A12345_20260818_143000.001      (volume 1 – incl. embedded manifest covering everything selected)
-    CMS-A12345_20260818_143000.002      (volume 2)
+    CMS-A12345_20260818_143000.7z.001      (volume 1 – incl. embedded manifest covering everything selected)
+    CMS-A12345_20260818_143000.7z.002      (volume 2)
 ```
 
-> When **split** is off (`VolumeSizeMB = 0`) you get a single file, e.g.
-> `CMS-A12345_20260818_143000.zip`. Reassemble volumes by opening the `.001`
-> file in 7-Zip (all parts must be in the same folder) — or, without 7-Zip,
-> concatenate the parts in order:
-> `copy /b CMS-A12345_20260818_143000.001+CMS-A12345_20260818_143000.002 CMS-A12345_20260818_143000.zip`.
+> When **split** is off (`VolumeSizeMB = 0`) you get a single file in
+> whichever format is configured, e.g. `CMS-A12345_20260818_143000.zip`.
+
+#### Split archives are always native 7z
+
+> A split archive is **always** built as native 7z volumes, regardless of the
+> configured archive format — `ArchiveFormat: zip` only takes effect for an
+> **un-split** archive. This isn't a preference, it's a correctness fix:
+> 7-Zip's own volume switch (`-v`) only splits its native `.7z` container — it
+> silently ignores `-v` for `.zip` (writes one whole file and exits 0 as if
+> nothing were wrong). An earlier version of this tool worked around that by
+> raw-byte-splitting a finished `.zip` itself into `.001`/`.002`/… parts. That
+> turned out to be a real integrity risk: 7-Zip only ever reports a genuine,
+> checked volume count (`Volumes = N`) for its *own* native multi-volume
+> format — tested against a raw-byte-split zip with a part deliberately
+> withheld, `7z l` still happily reported the **wrong**, present-file-count
+> "Volumes = N" as if that were the true total, rather than failing. A
+> receiving tool that trusts that number (rather than requiring a full `7z t`
+> pass with 7-Zip's own "Everything is Ok") could act on a truncated result
+> without any error ever being raised. Native 7z volumes don't have this gap:
+> `7z l`/`7z t`/`7z x` against a real multi-volume 7z archive **only** report
+> a volume count — or succeed at all — once every volume is genuinely present
+> (verified against the archive's real end-of-archive header); given a
+> partial set they fail outright with a non-zero exit code and "Unexpected
+> end of archive", every time.
 >
-> 7-Zip's own volume switch only splits its native `.7z` format — it silently
-> ignores splitting for `.zip`. So for `zip` archives, this tool builds the
-> complete archive first and then splits it itself into `.001`/`.002`/… parts
-> (the same raw sequential-byte layout 7-Zip's own volumes use), so the split
-> size setting works for **both** archive formats.
+> Reassemble by opening the `.001` file in 7-Zip (all parts must be in the
+> same folder), or from the command line: `7z x CMS-A12345_20260818_143000.7z.001`.
+> Plain `copy /b`/`cat` concatenation does **not** work for native 7z volumes
+> (unlike the old raw byte split) — you need 7-Zip (or a compatible tool like
+> `7-Zip-zstd`/`p7zip`/`py7zr`) at the receiving end to open a split delivery.
+> If that's a hard requirement for some recipients, keep archives **un-split**
+> (`VolumeSizeMB = 0`) — 7-Zip's normal `zip` creation there is completely
+> standard and opens with any zip utility.
 >
 > `.001` is always the LAST volume to actually arrive at the destination,
 > regardless of compression order — every other volume transfers the moment
-> it's ready, but `.001` is deliberately held back until they've all been
-> queued. You can't reassemble/open the set without it, so this stops a
-> still-incomplete transfer from looking usable.
+> the whole batch is ready, but `.001` is deliberately held back until they've
+> all been queued. You can't reassemble/open the set without it, so this stops
+> a still-incomplete transfer from looking usable.
 
 The archive embeds `CMS-A12345_20260818_143000_MANIFEST.txt` and `.csv`
 listing every original file's size, timestamp and SHA-256 / MD5 hash, with

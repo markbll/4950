@@ -35,7 +35,7 @@ function Get-DefaultConfig {
         CasePrefix          = 'CMS-A'                  # Enforced prefix for case numbers
         # --- Compression -------------------------------------------------------
         CompressionLevel    = 5                        # 0 (store) .. 9 (ultra)
-        ArchiveFormat       = 'zip'                     # zip | 7z
+        ArchiveFormat       = 'zip'                     # zip | 7z - only honoured when VolumeSizeMB is 0; a split always forces 7z (see New-A4950Archive)
         VolumeSizeMB        = 2048                      # Split archives into volumes of this size (MB). 0 = no split
         Password            = ''                       # Optional AES-256 archive password (blank = none)
         # --- Hashing -----------------------------------------------------------
@@ -339,17 +339,35 @@ function New-A4950Archive {
         [switch]$LowResource            # Slow Machine Mode: single-threaded, capped compression level
     )
 
+    # 7-Zip's -v (volumes) switch only splits the native 7z container - it
+    # silently does NOT split zip archives (7z.exe just writes one whole .zip
+    # and exits 0, ignoring -v entirely). Worse, a home-rolled raw byte split
+    # of a zip is not verifiable by a receiver: 7-Zip only ever reports a
+    # genuine, end-of-archive-header-checked "Volumes = N" for its own native
+    # multi-volume format - given a partial set of raw byte-split files, `7z l`
+    # instead just counts however many sequentially-numbered files happen to
+    # be physically present and reports THAT as the total, with no validation
+    # that it's really complete. So whenever the archive needs to be split
+    # into volumes, it is always built as native 7z, regardless of the
+    # requested Format - only that gives a receiving tool a volume count (and
+    # a `7z t` pass) that can actually be trusted. An unsplit archive is
+    # unaffected and still honours Format.
+    $effectiveFormat = if ($VolumeSizeMB -gt 0) { '7z' } else { $Format }
+    if ($effectiveFormat -ne $Format) {
+        # 7-Zip keeps whatever extension it's given regardless of -t, so the
+        # output file name must be corrected too - otherwise 7z-format volumes
+        # would misleadingly still be named "*.zip.001".
+        $ArchivePath = [System.IO.Path]::ChangeExtension($ArchivePath, '7z')
+    }
+
     $archiveDir = Split-Path -Parent $ArchivePath
     if (-not (Test-Path -LiteralPath $archiveDir)) {
         New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
     }
     $archiveLeaf = Split-Path -Leaf $ArchivePath
-    # Split parts are named "<base>.001" (no format extension) - see splitting
-    # code below - so stale-file matching is done against the extension-less
-    # base name, which also still matches the whole archive itself.
     # TrimEnd('.') is defensive: a base name ending in a dot (however it got
-    # there) would otherwise leave a stray "..001"/"..zip" double-dot once
-    # the "." separator is appended back for the extension or part number.
+    # there) would otherwise leave a stray "..7z" double-dot once the "."
+    # separator is appended back for the extension.
     $baseLeaf = ([System.IO.Path]::GetFileNameWithoutExtension($ArchivePath)).TrimEnd('.')
 
     # Remove any stale output from a previous run so volume detection is clean.
@@ -358,28 +376,22 @@ function New-A4950Archive {
 
     # Build 7z argument list.  'a' = add, -mx = level, -t = type.
     # Multiple -SourcePath entries are added to the SAME archive in one pass,
-    # so several selected folders/files end up combined into a single zip.
+    # so several selected folders/files end up combined into a single archive.
     #
-    # NOTE: 7-Zip's -v (volumes) switch only splits the native 7z container -
-    # it silently does NOT split zip archives (7z.exe just writes one whole
-    # .zip and ignores -v). So for zip we build the complete archive here and
-    # split it ourselves afterwards (see Split-A4950File below); for 7z we let
-    # 7-Zip's own -v do it natively as before.
-    $splitZipOurselves = ($Format -eq 'zip' -and $VolumeSizeMB -gt 0)
     # Slow Machine Mode trades compression ratio for the smallest possible CPU
     # footprint: store (no compression math, just I/O) and single-threaded,
     # regardless of the Level/format the operator has set. Hashing, manifest
     # and verification are unaffected - only the compression cost changes.
     $effectiveLevel = if ($LowResource) { 0 } else { $Level }
     $szArgs = [System.Collections.Generic.List[string]]::new()
-    $szArgs.AddRange([string[]]@('a', "-t$Format", "-mx=$effectiveLevel", '-y', $ArchivePath))
+    $szArgs.AddRange([string[]]@('a', "-t$effectiveFormat", "-mx=$effectiveLevel", '-y', $ArchivePath))
     foreach ($sp in $SourcePath) { $szArgs.Add($sp) }
     if ($LowResource) { $szArgs.Add('-mmt=off') } else { $szArgs.Add('-mmt=on') }   # multi-threaded compression - 7-Zip supports this for both zip (deflate) and 7z
-    if ($VolumeSizeMB -gt 0 -and -not $splitZipOurselves) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes
+    if ($VolumeSizeMB -gt 0) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes - always native now, see $effectiveFormat above
     if ($ExtraFiles)      { foreach ($ef in $ExtraFiles) { $szArgs.Add($ef) } }
     if ($Password) {
         $szArgs.Add("-p$Password")
-        if ($Format -eq '7z') { $szArgs.Add('-mhe=on') }      # encrypt headers too
+        if ($effectiveFormat -eq '7z') { $szArgs.Add('-mhe=on') }      # encrypt headers too
     }
     if ($ExcludePatterns) {
         foreach ($x in $ExcludePatterns) { $szArgs.Add("-xr!$x") }
@@ -389,6 +401,7 @@ function New-A4950Archive {
         Success     = $false
         Cancelled   = $false
         ArchivePath = $ArchivePath
+        Format      = $effectiveFormat   # what was actually written - can differ from the requested Format when split
         Files       = @()               # actual output file(s): the archive, or its volume parts
         IsSplit     = ($VolumeSizeMB -gt 0)
         ExitCode    = -1
@@ -407,150 +420,30 @@ function New-A4950Archive {
         return $result
     }
 
-    if ($splitZipOurselves) {
-        # zip: 7-Zip wrote one complete file at $ArchivePath - split it ourselves
-        # into .001/.002/... parts of the requested size, then remove the whole
-        # file so only the parts remain (matching 7-Zip's own -v behaviour).
-        # We read/write strictly in order (.001 fully closed before .002 starts),
-        # so -OnPartReady fires per part in true completion order, letting the
-        # caller start transferring .001 immediately rather than waiting for
-        # the whole split to finish.
-        if (Test-Path -LiteralPath $ArchivePath) {
-            $split = Split-A4950File -Path $ArchivePath -ChunkBytes ([int64]$VolumeSizeMB * 1MB) `
-                        -CancelCheck $CancelCheck -OnPartReady $OnPartReady
-            if ($split.Cancelled) {
-                $result.Cancelled = $true
-                Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -LiteralPath $archiveDir -Filter "$baseLeaf.*" -ErrorAction SilentlyContinue |
-                    Remove-Item -Force -ErrorAction SilentlyContinue
-                return $result
-            }
-            if ($split.Success -and $split.Parts.Count -gt 0) {
-                Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
-                $result.Files = @($split.Parts)
-            } else {
-                $result.Files = @($ArchivePath)   # splitting failed - fall back to the whole file
-                if ($OnPartReady) { & $OnPartReady $ArchivePath }
-            }
-        }
+    # 7z's own -v volumes (or an unsplit archive) are only known to exist, and
+    # only guaranteed complete, once 7z.exe has fully exited - the process is
+    # a black box while running, and 7-Zip does not necessarily finalise
+    # volumes in ascending numeric order internally (e.g. the FIRST volume
+    # can be the LAST one it finishes writing), so there is no safe way to
+    # start transferring any of its volumes early. All produced files are
+    # reported via -OnPartReady together, in one batch, only after the
+    # process has completed. Volumes are left exactly as 7-Zip names them -
+    # "<base>.7z.001", "<base>.7z.002", ... - so the on-disk name always
+    # signals the real container format, and a receiver testing them with
+    # `7z t`/`7z l` gets 7-Zip's own genuine, verified volume count.
+    if ($VolumeSizeMB -gt 0) {
+        $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
+        if ($vols) { $result.Files = @($vols.FullName) }
+        elseif (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }  # not actually split
+    } else {
+        if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
     }
-    else {
-        # 7z's own -v volumes (or an unsplit archive of either format) are only
-        # known to exist, and only guaranteed complete, once 7z.exe has fully
-        # exited - the process is a black box while running, and 7-Zip does not
-        # necessarily finalise volumes in ascending numeric order internally
-        # (e.g. the FIRST volume can be the LAST one it finishes writing), so
-        # there is no safe way to start transferring any of its volumes early.
-        # All produced files are reported via -OnPartReady together, in one
-        # batch, only after the process has completed.
-        if ($VolumeSizeMB -gt 0) {
-            # With -v, 7-Zip writes <archive>.<format>.001, .002, ... (e.g.
-            # "case.7z.001") - rename each volume to strip the format
-            # extension so the on-disk name matches our own zip-splitting
-            # convention: "case.001" instead of "case.7z.001".
-            $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
-            if ($vols) {
-                $renamedPaths = foreach ($v in $vols) {
-                    $suffix  = $v.Name.Substring($archiveLeaf.Length)   # e.g. ".001"
-                    $newName = "$baseLeaf$suffix"
-                    $newPath = Join-Path $archiveDir $newName
-                    Rename-Item -LiteralPath $v.FullName -NewName $newName -Force
-                    $newPath
-                }
-                $result.Files = @($renamedPaths)
-            }
-            elseif (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }  # not actually split
-        } else {
-            if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
-        }
-        if ($OnPartReady) { foreach ($f in $result.Files) { & $OnPartReady $f } }
-    }
+    if ($OnPartReady) { foreach ($f in $result.Files) { & $OnPartReady $f } }
 
     # 7-Zip exit codes: 0 = OK, 1 = warning (still usable).
     $result.Success = ($result.ExitCode -in 0, 1) -and ($result.Files.Count -gt 0)
     return $result
-}
-
-function Split-A4950File {
-    <#
-    .SYNOPSIS Split a file into fixed-size .001, .002, ... parts (raw byte split).
-    .DESCRIPTION
-        Used for zip archives, since 7-Zip's -v volume switch does not support
-        the zip container format (it silently produces one whole file instead).
-        The parts are plain sequential byte chunks, named "<base>.001",
-        "<base>.002", ... (the original file's extension is dropped, so a
-        split of "archive.zip" produces "archive.001", "archive.002", ...) -
-        reassemble by concatenating them in order, e.g. on Windows:
-            copy /b archive.001+archive.002+archive.003 archive.zip
-        This is the same mechanism 7-Zip's own volumes use internally, so the
-        parts are handled identically by the rest of the pipeline (transfer,
-        naming, "open the .001" instructions).
-
-        We read and write strictly in order - .001 is opened, fully written and
-        CLOSED before .002 is even created - so each part's completion is known
-        exactly and in true numeric order. -OnPartReady is invoked with a part's
-        full path immediately after it is closed (fully flushed to disk), so a
-        caller can start transferring it right away instead of waiting for the
-        whole file to be split. It is never called for a part that was still
-        being written when cancellation happened.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][int64]$ChunkBytes,
-        [scriptblock]$CancelCheck,
-        [scriptblock]$OnPartReady
-    )
-    $parts = New-Object System.Collections.Generic.List[string]
-    # Cast both args to [int64] explicitly - PowerShell's overload resolution
-    # can otherwise pick Math.Min(Int32,Int32) and fail converting a >2GB
-    # ChunkBytes value into Int32 ("value was either too large or too small").
-    $bufSize = [int][Math]::Min([int64]$ChunkBytes, [int64]4MB)
-    $buffer = New-Object byte[] $bufSize
-    $partIndex = 0
-    $cancelled = $false
-    # Parts drop the original extension, e.g. "archive.zip" -> "archive.001",
-    # not "archive.zip.001". TrimEnd('.') is defensive: a base name that
-    # itself ends in a dot would otherwise leave a stray "..001".
-    $baseNoExt = ([System.IO.Path]::ChangeExtension($Path, $null)).TrimEnd('.')
-
-    $in = [System.IO.File]::OpenRead($Path)
-    try {
-        while ($in.Position -lt $in.Length) {
-            if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
-            $partIndex++
-            $partPath = "{0}.{1:D3}" -f $baseNoExt, $partIndex
-            $partOk = $false
-            $out = [System.IO.File]::OpenWrite($partPath)
-            try {
-                $remaining = $ChunkBytes
-                while ($remaining -gt 0 -and $in.Position -lt $in.Length) {
-                    if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
-                    $toRead = [int][Math]::Min([int64]$buffer.Length, [int64]$remaining)
-                    $n = $in.Read($buffer, 0, $toRead)
-                    if ($n -le 0) { break }
-                    $out.Write($buffer, 0, $n)
-                    $remaining -= $n
-                }
-                if (-not $cancelled) { $partOk = $true }
-            } finally { $out.Dispose() }   # fully flushed and closed at this point
-            if ($cancelled) {
-                Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
-                break
-            }
-            if ($partOk) {
-                $parts.Add($partPath)
-                if ($OnPartReady) { & $OnPartReady $partPath }   # safe: this part is complete and closed
-            }
-        }
-    } finally { $in.Dispose() }
-
-    if ($cancelled) {
-        foreach ($p in $parts) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
-        return [pscustomobject]@{ Success = $false; Cancelled = $true; Parts = @() }
-    }
-    return [pscustomobject]@{ Success = $true; Cancelled = $false; Parts = @($parts) }
 }
 
 #endregion

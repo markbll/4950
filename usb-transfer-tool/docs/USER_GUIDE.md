@@ -225,49 +225,72 @@ Windows volume/mute settings automatically.
 
 ## 4. Output layout
 
+Files land **directly in the destination — no per-case sub-folder**.
+Uniqueness comes from the file name itself (CMS case and/or OP name, pass
+number if given, and the job's own timestamp):
+
 ```
 C:\Destination\
-└─ CMS-A12345\
-   └─ CMS-A12345.7z        ← one combined archive (manifest embedded inside)
+    CMS-A12345_20260818_143000.zip            ← un-split (VolumeSizeMB = 0): one combined archive, manifest embedded inside
 ```
 
-Inside the `.7z`:
+or, with a split size set:
+
+```
+C:\Destination\
+    CMS-A12345_20260818_143000.7z.001         ← volume 1, manifest embedded inside
+    CMS-A12345_20260818_143000.7z.002         ← volume 2
+```
+
+Inside the archive:
 ```
 Photos\...                         (original files, grouped by top-level folder)
 Documents\...
-CMS-A12345_MANIFEST.txt           (human-readable hashes, all items)
-CMS-A12345_MANIFEST.csv           (machine-readable hashes, all items)
+CMS-A12345_20260818_143000_MANIFEST.txt      (human-readable hashes, all items)
+CMS-A12345_20260818_143000_MANIFEST.csv      (machine-readable hashes, all items)
 ```
 
 Manifest header records: case number, source path, UTC timestamp, machine,
 operator, file count and algorithms — a lightweight chain-of-custody record.
 
-**Split works for both `zip` and `7z`.** 7-Zip's own volume switch only splits
-its native `.7z` format — it silently ignores splitting for `.zip`. This tool
-works around that: for `zip`, it builds the whole archive first and then
-splits it itself into `.001`/`.002`/… parts (the same raw byte layout 7-Zip's
-own volumes use), so a `zip` job with a split size set actually produces
-volumes instead of one large file. Reassemble either format's volumes by
-opening the `.001` in 7-Zip, or — without 7-Zip — concatenate the parts in
-order: `copy /b file.001+file.002 file.zip`. Volume file names drop the
-archive extension (`file.001`, not `file.zip.001`).
+**A split archive is always native 7z, regardless of the configured archive
+format.** `ArchiveFormat: zip` only takes effect for an **un-split** archive
+(`VolumeSizeMB = 0`). This is a correctness fix, not a preference: 7-Zip's own
+volume switch (`-v`) only splits its native `.7z` container — it silently
+ignores `-v` for `.zip` (writes one whole file and exits 0 as if nothing were
+wrong). An earlier version of this tool worked around that by raw-byte-
+splitting a finished `.zip` into `.001`/`.002`/… parts. That turned out to be
+a real integrity risk: 7-Zip only ever reports a genuine, checked volume
+count for its *own* native format — tested against a raw-byte-split zip with
+a part deliberately withheld, `7z l` still reported the wrong, present-file-
+count "Volumes = N" as if that were the true total, rather than failing. A
+receiving/watch-folder tool that trusts that number (instead of requiring a
+full `7z t` pass with 7-Zip's own "Everything is Ok") could act on a
+truncated result without any error ever being raised. Native 7z volumes
+don't have this gap: `7z l`/`7z t`/`7z x` against a real multi-volume 7z
+archive only report a volume count — or succeed at all — once every volume
+is genuinely present; given a partial set they fail outright with a non-zero
+exit code and "Unexpected end of archive", every time, with no misleading
+count printed first.
 
-**Volumes transfer as soon as each one is ready (zip only) — except `.001`,
-which is always last.** For `zip`, the tool writes `.001`, `.002`, … strictly
-in order — `.001` is completely closed before `.002` is even started — so
-each volume's completion is known exactly and every volume from `.002`
-onward starts uploading immediately while later volumes are still being
-written. `.001` itself is the one exception: it's deliberately held back and
-only queued for transfer once every other volume already has been. Since the
-set can't be reassembled or opened at the destination without `.001`, this
-means a still-incomplete transfer can never be mistaken for a finished one.
-`7z`'s own `-v` volumes don't get the "transfer the moment it's ready"
-treatment at all: 7-Zip is a separate process, and it does **not**
-necessarily finish writing its volumes in ascending numeric order internally
-(the first volume file can, in some cases, be the *last* one it actually
-finishes) — so for `7z`, all volumes are only picked up for transfer
-together, once the whole 7-Zip process has exited and every volume is
-confirmed complete, with `.001` still sent last within that same batch.
+Reassemble by opening the `.001` file in 7-Zip (all parts must be in the same
+folder), or `7z x CMS-A12345_20260818_143000.7z.001` from the command line.
+Plain `copy /b`/`cat` concatenation does **not** work for native 7z volumes —
+you need 7-Zip (or a compatible tool) at the receiving end to open a split
+delivery. If that's a hard requirement for some recipients, keep archives
+**un-split** (`VolumeSizeMB = 0`); 7-Zip's normal `zip` creation there is
+unaffected and opens with any zip utility.
+
+**Volumes transfer as one batch, once the whole archive is confirmed
+complete — except `.001`, which is always last within that batch.** 7-Zip is
+a separate process, and it does **not** necessarily finish writing its
+volumes in ascending numeric order internally (the first volume file can, in
+some cases, be the *last* one it actually finishes) — so no volume is ever
+picked up for transfer early; all of them are only reported once the whole
+7-Zip process has exited and every volume is confirmed complete. Within that
+batch, `.001` is still deliberately held back and queued last: since the set
+can't be reassembled or opened at the destination without it, this means a
+still-incomplete transfer can never be mistaken for a finished one.
 
 ---
 

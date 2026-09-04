@@ -217,6 +217,16 @@ function Invoke-A4950TransferJob {
                 # config (e.g. ".zip" instead of "zip") producing a double dot here.
                 $archivePath = Join-Path $staging ("{0}.{1}" -f $uniqueBase, $cfg.ArchiveFormat.TrimStart('.'))
                 $splitNote = if ($volMB -gt 0) { " split @ ${volMB} MB" } else { '' }
+                if ($volMB -gt 0 -and $cfg.ArchiveFormat -ne '7z') {
+                    # 7-Zip's -v switch does not split zip archives (it silently writes one
+                    # whole file and ignores -v) - and a home-rolled raw byte split would not
+                    # be verifiable by a receiver: 7-Zip only reports a genuine, checked
+                    # volume count for its own native container, not for arbitrary
+                    # sequentially-numbered files. So any split always forces 7z, regardless
+                    # of the configured archive format - see New-A4950Archive.
+                    Write-A4950WorkerLog $Shared "Split requested: forcing 7z format (a split zip is not reliably verifiable by a receiving tool; 7-Zip's own volumes are)." 'WARN'
+                    $archivePath = [System.IO.Path]::ChangeExtension($archivePath, '7z')
+                }
                 Write-A4950WorkerLog $Shared "Compressing: $($existingItems.Count) item(s) -> $(Split-Path -Leaf $archivePath) (level $($cfg.CompressionLevel)$splitNote)" 'STEP'
                 Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=-1; Name=$caseSafe }
                 # -OnPartReady enqueues each produced file for transfer the moment it is

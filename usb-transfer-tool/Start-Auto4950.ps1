@@ -821,10 +821,14 @@ function Parse-SplitMB {
 function Update-Footer {
     $sz = Resolve-SevenZip -PreferredPath $config.SevenZipPath
     if (-not $sz) { $sz = 'NOT FOUND' }
-    $split = if ([int]$config.VolumeSizeMB -gt 0) { "Split: $([int]$config.VolumeSizeMB) MB" } else { 'Split: off' }
+    $isSplit = [int]$config.VolumeSizeMB -gt 0
+    $split = if ($isSplit) { "Split: $([int]$config.VolumeSizeMB) MB" } else { 'Split: off' }
+    # A split archive always forces native 7z, regardless of the configured
+    # format - show the format that will actually be used, not the setting.
+    $fmt   = if ($isSplit) { '7z (forced by split)' } else { $config.ArchiveFormat }
     $hash  = if ($config.EmbedManifest) { "Hash:$($config.HashAlgorithms -join '+')" } else { 'Hash:OFF' }
     $vfy   = if ($config.VerifyAfterTransfer) { 'Verify:on' } else { 'Verify:off' }
-    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $($config.ArchiveFormat)  L$($config.CompressionLevel)  $split  $hash  $vfy"
+    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $fmt  L$($config.CompressionLevel)  $split  $hash  $vfy"
 }
 
 # ----------------------------------------------------------------------------
@@ -1074,8 +1078,12 @@ function Start-Capture {
     if (-not $NoConfirm) {
         # List each selected item's FULL source path, the destination folder and the
         # single combined archive name.
-        $fmt = $config.ArchiveFormat
-        $splitSuffix = if ([int]$config.VolumeSizeMB -gt 0) { ".001, .002, ..." } else { '' }
+        $isSplit = [int]$config.VolumeSizeMB -gt 0
+        # A split archive always ends up native 7z, regardless of the configured
+        # format - 7-Zip's -v switch doesn't split zip, and only a genuine 7z
+        # volume set gives a receiving tool a verifiable volume count.
+        $fmt = if ($isSplit) { '7z' } else { $config.ArchiveFormat }
+        $splitSuffix = if ($isSplit) { ".001, .002, ... (split forces 7z format)" } else { '' }
         $lines = foreach ($it in $items) { "   SOURCE: $it" }
         $maxShow = 15
         $shown = @($lines | Select-Object -First $maxShow)
@@ -1393,11 +1401,13 @@ COMBINED ARCHIVE
   collides.
 
 TRANSFER ORDER
-  When the archive is split into volumes, every volume transfers the moment
-  it's ready - EXCEPT .001, which is deliberately held back and only sent
-  once every other volume has already been queued. Since the set can't be
-  reassembled/opened without .001, this means an incomplete transfer at the
-  destination can never look like a finished one.
+  A split archive's volumes are only knowable/complete once 7-Zip's process
+  has fully exited, so all of them are picked up for transfer together right
+  after that - never early. Within that batch, EXCEPT .001, which is
+  deliberately held back and only sent once every other volume has already
+  been queued. Since the set can't be reassembled/opened without .001, this
+  means an incomplete transfer at the destination can never look like a
+  finished one.
 
 OPTIONS (all on the main screen, right-hand panel)
   Network share, 7-Zip path, staging folder, case prefix, archive format,
@@ -1412,24 +1422,32 @@ WHAT HAPPENS
   - Everything selected is compressed with 7-Zip into ONE archive; the
     manifest is embedded.
   - Large archives are split into volumes ($([int]$config.VolumeSizeMB) MB each by default) so no
-    single file is unwieldy. Set the size to 0 for one file. Splitting works for
-    both zip and 7z (7-Zip itself only splits .7z, so for zip this tool splits
-    the finished archive itself into the same .001/.002/... parts).
-  - For a split zip, each volume starts transferring the instant it's fully
-    written (.001 is closed before .002 is even started) - no waiting for the
-    rest. 7z's own volumes transfer together as one batch once the whole
-    7-Zip process has exited, since it can finish its volumes out of numeric
-    order internally and there's no safe way to tell from outside.
+    single file is unwieldy. Set the size to 0 for one file. A split ALWAYS
+    uses native 7z volumes, regardless of the archive format configured -
+    7-Zip's -v switch silently does not split .zip, and a home-rolled byte
+    split would not be reliably verifiable by a receiving tool the way
+    7-Zip's own volumes are (see NAMING below).
+  - Volumes transfer together as one batch once the whole 7-Zip process has
+    exited and every volume is confirmed complete - never early, since 7-Zip
+    can finish its volumes out of numeric order internally and there's no
+    safe way to tell from outside while it's still running.
   - Optionally the transferred archive is re-hashed at the destination to verify.
 
 NAMING
   Files land directly in the destination - NO per-case sub-folder. The
   archive name is built from the CMS case and/or OP name, plus pass number if
   given, plus this job's own timestamp, so two jobs never collide there:
-    <share>\$($config.CasePrefix)12345_20260818_143000.$($config.ArchiveFormat)
-  When split, volumes are suffixed .001, .002, ... (open the .001 in 7-Zip to
-  reassemble; keep all parts together). The manifest and transfer log sent to
-  the destination use the same unique name.
+    <share>\$($config.CasePrefix)12345_20260818_143000.$($config.ArchiveFormat)   (unsplit)
+    <share>\$($config.CasePrefix)12345_20260818_143000.7z.001, .7z.002, ...       (split)
+  When split, volumes are always native 7z (regardless of archive format) -
+  open the .001 in 7-Zip to reassemble (keep all parts together), or
+  "7z x <name>.7z.001" from the command line. Plain copy/cat concatenation
+  does NOT work for these - a genuine 7z volume set is what lets 7-Zip
+  itself refuse to report a volume count, or open at all, until every part
+  is truly present; a plain byte-split file can't offer that guarantee. If
+  recipients without 7-Zip need to open a delivery directly, keep it unsplit.
+  The manifest and transfer log sent to the destination use the same unique
+  name.
 
 SYSTEM MONITOR
   Live CPU, memory, network throughput and temp-folder free space.
