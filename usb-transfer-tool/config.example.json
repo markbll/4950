@@ -5,6 +5,7 @@
   "CompressionLevel": 5,
   "ArchiveFormat": "zip",
   "VolumeSizeMB": 2048,
+  "TransferMode": "OnComplete",
   "Password": "",
   "HashAlgorithms": ["SHA256", "MD5"],
   "EmbedManifest": true,

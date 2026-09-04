@@ -105,16 +105,19 @@ UI.
 ### Options panel (all settings, on the main screen)
 Everything is editable on the right-hand **Options** panel — destination,
 7-Zip path, staging folder, case prefix, **archive format**, **volume/split
-size (sizing)**, compression level, password, hashing, manifest embedding,
-verification, prompt-on-insert, select-all default and exclude
-patterns. Changes apply immediately when you press **Start**; **Save Options**
-writes them to `config.json` and then hides the Options panel. Every checkbox
-can be ticked *and* un-ticked.
+size (sizing)**, **archive volume transfer mode**, compression level,
+password, hashing, manifest embedding, verification, prompt-on-insert,
+select-all default and exclude patterns. Changes apply immediately when you
+press **Start**; **Save Options** writes them to `config.json` and then hides
+the Options panel. Every checkbox can be ticked *and* un-ticked.
 
 **Combined archive** — every folder/file you select is always packed into a
 **single** archive (this is fixed behavior, not a setting): one shared
 manifest lists every file, prefixed with its original top-level folder name so
-nothing collides. Nothing transfers until that one compression pass finishes.
+nothing collides. With the default transfer mode, nothing transfers until
+that one compression pass finishes; with **Transfer files instantly** (see
+below), a split archive's volumes can start transferring well before
+compression is done.
 
 **Destination naming** — files land **directly in the destination**, with no
 per-case sub-folder (this is fixed behavior, not a setting). Uniqueness comes
@@ -281,15 +284,32 @@ delivery. If that's a hard requirement for some recipients, keep archives
 **un-split** (`VolumeSizeMB = 0`); 7-Zip's normal `zip` creation there is
 unaffected and opens with any zip utility.
 
-**Volumes transfer as one batch, once the whole archive is confirmed
-complete — except `.001`, which is always last within that batch.** 7-Zip is
-a separate process, and it does **not** necessarily finish writing its
-volumes in ascending numeric order internally (the first volume file can, in
-some cases, be the *last* one it actually finishes) — so no volume is ever
-picked up for transfer early; all of them are only reported once the whole
-7-Zip process has exited and every volume is confirmed complete. Within that
-batch, `.001` is still deliberately held back and queued last: since the set
-can't be reassembled or opened at the destination without it, this means a
+**When each volume actually transfers is controlled by "Archive volume
+transfer" in Options** (only relevant when split):
+
+- **Transfer all files once completed** (default, safest) — 7-Zip is a
+  separate process, and it does **not** necessarily finish writing its
+  volumes in ascending numeric order internally (the first volume file can,
+  in some cases, be the *last* one it actually finishes) — so no volume is
+  picked up for transfer early; all of them are only reported once the whole
+  7-Zip process has exited and every volume is confirmed complete.
+- **Transfer files instantly** — each volume is picked up for transfer the
+  moment 7-Zip finishes writing it, rather than waiting for the rest.
+  Verified against real 7-Zip 23.01: 7-Zip writes each volume to a temporary
+  file and only renames it to its final name once that volume's content is
+  completely flushed and will never be touched again — that rename is the
+  signal this mode watches for while 7-Zip is still running, backed by an
+  exclusive-open probe as a second, best-effort check that nothing still has
+  the file open before it's treated as safe to move. **Quick Transfer always
+  turns this on.**
+
+**Either way, `.001` is always the last volume to actually arrive.** It's
+deliberately held back and queued last regardless of transfer mode — and
+this isn't just an extra safety margin, it matches 7-Zip's own behaviour:
+confirmed empirically, 7-Zip defers finalising volume `.001` until the exact
+same instant as the very last volume, since the archive's start header can
+only be written once the whole body is known. Since the set can't be
+reassembled or opened at the destination without `.001`, this means a
 still-incomplete transfer can never be mistaken for a finished one.
 
 ---
@@ -307,6 +327,7 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Case prefix | Required prefix for case numbers (`CMS-A`) |
 | Archive format | `zip` (default, portable) or `7z` (smaller) |
 | Split into volumes (MB) | Max size per file; default **2048** (2 GB); `0` = single file |
+| Archive volume transfer | "Transfer all files once completed" (default) or "Transfer files instantly"; only relevant when split - see § 4 |
 | Compression level | 0 (store) … 9 (ultra) |
 | Archive password | Optional AES-256 (encrypts headers too on `7z`) |
 | Hash SHA-256 / MD5 | Which hashes to compute |

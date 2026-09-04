@@ -24,7 +24,7 @@ param()
 # Bootstrapping
 # ----------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '2.0'
+$script:AppVersion = '3.0'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -311,6 +311,10 @@ $script:SlowMachineMode = $false
                 <ComboBoxItem>8192</ComboBoxItem>
               </ComboBox>
               <TextBlock Text="(value in MB; type a custom number or pick a preset)" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,6"/>
+              <TextBlock Text="Archive volume transfer"/>
+              <RadioButton x:Name="OptXferOnComplete" GroupName="XferMode" Content="Transfer all files once completed" Margin="0,2,0,0" IsChecked="True"/>
+              <RadioButton x:Name="OptXferInstant"    GroupName="XferMode" Content="Transfer files instantly" Margin="0,2,0,0"/>
+              <TextBlock Text="'Once completed' waits for the whole archive before sending anything - safest, and required when there's no split. 'Instantly' sends each volume the moment 7-Zip finishes it, rather than waiting for the whole archive; the volume named .001 still always goes last either way, since 7-Zip itself only finalises it at the very end." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6"/>
               <TextBlock x:Name="OptLevelLbl" Text="Compression level: 5"/>
               <Slider x:Name="OptLevel" Minimum="0" Maximum="9" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,8"/>
               <TextBlock Text="Password (AES-256, optional)"/>
@@ -617,6 +621,8 @@ function Set-OptionsFromConfig {
     $ctrl.OptStage.Text     = $config.StagingFolder
     $ctrl.OptPrefix.Text    = $config.CasePrefix
     $ctrl.OptVolume.Text    = $(if ([int]$config.VolumeSizeMB -le 0) { 'No split (single file)' } else { [string]([int]$config.VolumeSizeMB) })
+    $ctrl.OptXferInstant.IsChecked    = ($config.TransferMode -eq 'Instant')
+    $ctrl.OptXferOnComplete.IsChecked = ($config.TransferMode -ne 'Instant')
     $ctrl.OptLevel.Value    = [double]$config.CompressionLevel
     $ctrl.OptLevelLbl.Text  = "Compression level: $([int]$config.CompressionLevel)"
     $ctrl.OptPwd.Password   = [string]$config.Password
@@ -638,6 +644,7 @@ function Sync-OptionsToConfig {
     if ($ctrl.OptPrefix.Text.Trim()) { $config.CasePrefix = $ctrl.OptPrefix.Text.Trim() }
     if ($ctrl.OptFormat.SelectedItem) { $config.ArchiveFormat = $ctrl.OptFormat.SelectedItem.Content }
     $config.VolumeSizeMB     = Parse-SplitMB ([string]$ctrl.OptVolume.Text)
+    $config.TransferMode     = if ($ctrl.OptXferInstant.IsChecked) { 'Instant' } else { 'OnComplete' }
     $config.CompressionLevel = [int]$ctrl.OptLevel.Value
     $algs = @(); if ($ctrl.OptSha.IsChecked) { $algs += 'SHA256' }; if ($ctrl.OptMd5.IsChecked) { $algs += 'MD5' }
     if ($algs.Count -eq 0) { $algs = @('SHA256') }
@@ -757,13 +764,14 @@ function Set-QuickTransfer {
     $ctrl.OptLevel.Value = 0
     $ctrl.OptLevelLbl.Text = 'Compression level: 0'
     $ctrl.OptVolume.Text = '250'
+    $ctrl.OptXferInstant.IsChecked = $true   # each part transfers the moment it's ready, not once the whole archive is done
     $ctrl.OptSha.IsChecked    = $false
     $ctrl.OptMd5.IsChecked    = $false
     $ctrl.OptEmbed.IsChecked  = $false   # no manifest -> originals are not hashed
     $ctrl.OptVerify.IsChecked = $false   # no re-hash at destination
     Sync-OptionsToConfig
     Update-Footer
-    Add-LogLine 'Quick Transfer ON: store (no compression), split @ 250 MB, NO hashing, NO verify - fastest throughput.' 'WARN'
+    Add-LogLine 'Quick Transfer ON: store (no compression), split @ 250 MB, transfer instantly, NO hashing, NO verify - fastest throughput.' 'WARN'
 }
 
 # ----------------------------------------------------------------------------
@@ -826,9 +834,10 @@ function Update-Footer {
     # A split archive always forces native 7z, regardless of the configured
     # format - show the format that will actually be used, not the setting.
     $fmt   = if ($isSplit) { '7z (forced by split)' } else { $config.ArchiveFormat }
+    $xfer  = if (-not $isSplit) { '' } elseif ($config.TransferMode -eq 'Instant') { '  Xfer:instant' } else { '  Xfer:on-complete' }
     $hash  = if ($config.EmbedManifest) { "Hash:$($config.HashAlgorithms -join '+')" } else { 'Hash:OFF' }
     $vfy   = if ($config.VerifyAfterTransfer) { 'Verify:on' } else { 'Verify:off' }
-    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $fmt  L$($config.CompressionLevel)  $split  $hash  $vfy"
+    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $fmt  L$($config.CompressionLevel)  $split$xfer  $hash  $vfy"
 }
 
 # ----------------------------------------------------------------------------
@@ -1083,7 +1092,8 @@ function Start-Capture {
         # format - 7-Zip's -v switch doesn't split zip, and only a genuine 7z
         # volume set gives a receiving tool a verifiable volume count.
         $fmt = if ($isSplit) { '7z' } else { $config.ArchiveFormat }
-        $splitSuffix = if ($isSplit) { ".001, .002, ... (split forces 7z format)" } else { '' }
+        $xferDesc = if ($config.TransferMode -eq 'Instant') { 'transferred instantly, as each finishes' } else { 'transferred once the whole archive is complete' }
+        $splitSuffix = if ($isSplit) { ".001, .002, ... (split forces 7z format; volumes $xferDesc)" } else { '' }
         $lines = foreach ($it in $items) { "   SOURCE: $it" }
         $maxShow = 15
         $shown = @($lines | Select-Object -First $maxShow)
@@ -1401,20 +1411,27 @@ COMBINED ARCHIVE
   collides.
 
 TRANSFER ORDER
-  A split archive's volumes are only knowable/complete once 7-Zip's process
-  has fully exited, so all of them are picked up for transfer together right
-  after that - never early. Within that batch, EXCEPT .001, which is
-  deliberately held back and only sent once every other volume has already
-  been queued. Since the set can't be reassembled/opened without .001, this
-  means an incomplete transfer at the destination can never look like a
-  finished one.
+  Set in Options under "Archive volume transfer" (only matters when split):
+    - "Transfer all files once completed" (default, safest): 7-Zip is a
+      black box while running, so every volume is picked up for transfer
+      together, only once the whole process has exited and every volume is
+      confirmed complete.
+    - "Transfer files instantly": each volume is picked up for transfer the
+      moment 7-Zip finishes writing it - not once the whole archive is done.
+  EITHER way, EXCEPT .001: it's always held back and sent only once every
+  other volume has already been queued - even in Instant mode, since 7-Zip
+  itself only finalises .001 at the very end of the run regardless (the
+  archive's start header can only be written once the whole body is known).
+  Since the set can't be reassembled/opened without .001, this means an
+  incomplete transfer at the destination can never look like a finished one.
 
 OPTIONS (all on the main screen, right-hand panel)
   Network share, 7-Zip path, staging folder, case prefix, archive format,
-  volume/split size, compression level, password, hashing, manifest embedding,
-  verification, prompt-on-insert, select-all default, delete-local and exclude
-  patterns. Every option can be toggled/edited and "Save Options" persists them
-  to config.json. Options also apply immediately when you press Start.
+  volume/split size, archive volume transfer mode, compression level,
+  password, hashing, manifest embedding, verification, prompt-on-insert,
+  select-all default, delete-local and exclude patterns. Every option can be
+  toggled/edited and "Save Options" persists them to config.json. Options
+  also apply immediately when you press Start.
 
 WHAT HAPPENS
   - Every original file across your whole selection is hashed (SHA-256 / MD5)
@@ -1427,10 +1444,8 @@ WHAT HAPPENS
     7-Zip's -v switch silently does not split .zip, and a home-rolled byte
     split would not be reliably verifiable by a receiving tool the way
     7-Zip's own volumes are (see NAMING below).
-  - Volumes transfer together as one batch once the whole 7-Zip process has
-    exited and every volume is confirmed complete - never early, since 7-Zip
-    can finish its volumes out of numeric order internally and there's no
-    safe way to tell from outside while it's still running.
+  - Volumes transfer per the "Archive volume transfer" setting above - see
+    TRANSFER ORDER.
   - Optionally the transferred archive is re-hashed at the destination to verify.
 
 NAMING

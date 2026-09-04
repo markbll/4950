@@ -227,21 +227,32 @@ function Invoke-A4950TransferJob {
                     Write-A4950WorkerLog $Shared "Split requested: forcing 7z format (a split zip is not reliably verifiable by a receiving tool; 7-Zip's own volumes are)." 'WARN'
                     $archivePath = [System.IO.Path]::ChangeExtension($archivePath, '7z')
                 }
+                $xferMode = if ($cfg.TransferMode -eq 'Instant') { 'Instant' } else { 'OnComplete' }
+                if ($volMB -gt 0) {
+                    $xferModeNote = if ($xferMode -eq 'Instant') { 'transferring volumes as each finishes' } else { 'transferring once the whole archive is complete' }
+                    Write-A4950WorkerLog $Shared "Transfer mode: $xferModeNote." 'INFO'
+                }
                 Write-A4950WorkerLog $Shared "Compressing: $($existingItems.Count) item(s) -> $(Split-Path -Leaf $archivePath) (level $($cfg.CompressionLevel)$splitNote)" 'STEP'
                 Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=-1; Name=$caseSafe }
-                # -OnPartReady enqueues each produced file for transfer the moment it is
-                # complete, so transfer starts ASAP rather than waiting for the whole
-                # archive. EXCEPT .001: it's always held back and enqueued last, once
-                # every other part is already queued (or, for an unsplit archive,
-                # there's nothing to hold it back from). This is deliberate: nothing at
-                # the destination can be reassembled/opened until .001 itself lands, so
-                # holding it back is a "not usable until everything else has arrived"
-                # signal. For a zip split into volumes, we write/close .001, .002, ...
-                # strictly in that order ourselves, so every part but .001 is still
-                # queued the moment it's done. For 7z's own -v volumes, completion order
-                # inside the running process isn't observable from outside it, so all of
-                # those are only reported here as one batch, right after 7z.exe has fully
-                # exited - .001 is simply queued last within that same batch.
+                # -OnPartReady enqueues each produced file for transfer. EXCEPT .001: it's
+                # always held back and enqueued last, once every other part is already
+                # queued (or, for an unsplit archive, there's nothing to hold it back
+                # from). This is deliberate: nothing at the destination can be
+                # reassembled/opened until .001 itself lands, so holding it back is a "not
+                # usable until everything else has arrived" signal - it also happens to
+                # match how 7-Zip itself behaves: confirmed empirically, 7-Zip defers
+                # finalising volume .001 until the very end of the run regardless of
+                # transfer mode, since the archive's start header can only be written once
+                # the whole body is known.
+                #   - TransferMode 'Instant' (New-A4950Archive -TransferMode Instant):
+                #     every OTHER volume is reported here the moment 7-Zip finishes
+                #     writing it - not once the whole archive is done - so transfer starts
+                #     well before compression finishes.
+                #   - TransferMode 'OnComplete' (the default): 7-Zip is a black box while
+                #     running and does not necessarily finalise volumes in ascending
+                #     numeric order internally, so nothing is reported until the whole
+                #     process has exited and every volume is confirmed complete - all
+                #     volumes then arrive here together, in one batch.
                 # [ref] rather than a plain variable: .GetNewClosure() snapshots plain
                 # variables by VALUE (a mutation inside the closure would neither persist
                 # across the multiple calls below nor be visible out here afterwards) - a
@@ -251,7 +262,7 @@ function Invoke-A4950TransferJob {
                 $a = New-A4950Archive -SevenZipPath $sevenZip -SourcePath $existingItems -ArchivePath $archivePath `
                         -Level $cfg.CompressionLevel -Format $cfg.ArchiveFormat -VolumeSizeMB $volMB -Password $cfg.Password `
                         -ExcludePatterns $cfg.ExcludePatterns -ExtraFiles $extraFiles -CancelCheck $cancel `
-                        -LowResource:([bool]$cfg.SlowMachineMode) `
+                        -LowResource:([bool]$cfg.SlowMachineMode) -TransferMode $xferMode `
                         -OnPartReady ({
                             param($p)
                             $leaf = Split-Path -Leaf $p

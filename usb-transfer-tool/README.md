@@ -26,15 +26,15 @@ optional pass number.
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
-| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
+| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
 | Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password, **multi-threaded** (`-mmt=on`) for both formats |
 | Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file. **A split always uses native 7z volumes**, regardless of the configured archive format — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
 | Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Transfer starts as soon as it's ready | Un-split archives transfer once the whole file is confirmed complete. A split archive's volumes are only knowable/complete once 7-Zip's process has fully exited, so all of them are picked up for transfer together right after that — never early |
-| `.001` always transfers last | Within that same batch, whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
+| Archive volume transfer mode | Options choice for a split archive: **Transfer all files once completed** (default, safest — waits for the whole archive) or **Transfer files instantly** (each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest). Quick Transfer always turns this on. Un-split archives are unaffected either way — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
+| `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — true in both transfer modes, since 7-Zip itself only finalises `.001` at the very end of the run regardless. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
 | Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
@@ -162,11 +162,31 @@ C:\Destination\
 > (`VolumeSizeMB = 0`) — 7-Zip's normal `zip` creation there is completely
 > standard and opens with any zip utility.
 >
-> `.001` is always the LAST volume to actually arrive at the destination,
-> regardless of compression order — every other volume transfers the moment
-> the whole batch is ready, but `.001` is deliberately held back until they've
-> all been queued. You can't reassemble/open the set without it, so this stops
-> a still-incomplete transfer from looking usable.
+> **Archive volume transfer mode** (Options → "Archive volume transfer",
+> only relevant when split) controls *when* each volume is picked up for
+> transfer:
+> - **Transfer all files once completed** (default): 7-Zip is a black box
+>   while running, so every volume is picked up for transfer together, only
+>   once the whole process has exited and every volume is confirmed complete.
+> - **Transfer files instantly**: each volume is picked up for transfer the
+>   moment 7-Zip finishes writing it, well before the rest of the archive is
+>   done. Verified against real 7-Zip 23.01: 7-Zip writes each volume to a
+>   `.tmp` file and only renames it to its final name once that volume's
+>   content is completely flushed and will never be touched again — that
+>   rename is the completion signal this mode watches for (with an
+>   exclusive-open probe as a second, best-effort check before treating a
+>   volume as safe to move).
+>
+> **`.001` is always the LAST volume to actually arrive at the destination,
+> in either mode.** Every other volume transfers as soon as it's ready (in
+> Instant mode) or as part of the completed batch (in the default mode), but
+> `.001` is deliberately held back until they've all been queued — and this
+> isn't just a safety margin, it matches 7-Zip's own behaviour: confirmed
+> empirically, 7-Zip defers finalising volume `.001` until the exact same
+> instant as the very last volume, regardless of transfer mode, since the
+> archive's start header can only be written once the whole body is known.
+> You can't reassemble/open the set without it, so this stops a
+> still-incomplete transfer from looking usable.
 
 The archive embeds `CMS-A12345_20260818_143000_MANIFEST.txt` and `.csv`
 listing every original file's size, timestamp and SHA-256 / MD5 hash, with

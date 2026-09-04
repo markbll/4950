@@ -37,6 +37,7 @@ function Get-DefaultConfig {
         CompressionLevel    = 5                        # 0 (store) .. 9 (ultra)
         ArchiveFormat       = 'zip'                     # zip | 7z - only honoured when VolumeSizeMB is 0; a split always forces 7z (see New-A4950Archive)
         VolumeSizeMB        = 2048                      # Split archives into volumes of this size (MB). 0 = no split
+        TransferMode        = 'OnComplete'              # OnComplete | Instant - see New-A4950Archive
         Password            = ''                       # Optional AES-256 archive password (blank = none)
         # --- Hashing -----------------------------------------------------------
         HashAlgorithms      = @('SHA256', 'MD5')       # Original-file hashing
@@ -261,14 +262,18 @@ function Invoke-A4950Process {
     .DESCRIPTION
         Starts a process, drains stdout/stderr asynchronously (no deadlock),
         and polls -CancelCheck every 150 ms. On cancel it kills the whole
-        process tree so the operation stops almost immediately.
+        process tree so the operation stops almost immediately. -OnTick, if
+        given, is also called on each ~150 ms poll while the process is still
+        running - used by New-A4950Archive's Instant transfer mode to notice
+        newly-finished archive volumes while 7-Zip is still working.
         Returns @{ ExitCode; Cancelled; Output }.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$Arguments,
-        [scriptblock]$CancelCheck
+        [scriptblock]$CancelCheck,
+        [scriptblock]$OnTick
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -297,6 +302,7 @@ function Invoke-A4950Process {
             try { if (-not $proc.HasExited) { $proc.Kill() } } catch {}
             break
         }
+        if ($OnTick) { & $OnTick }
     }
     try { $proc.WaitForExit(3000) | Out-Null } catch {}
 
@@ -336,7 +342,8 @@ function New-A4950Archive {
         [scriptblock]$CancelCheck,      # Return $true to abort (kills 7-Zip)
         [scriptblock]$OnPartReady,      # Called with a produced file's path as soon as it is complete
         [scriptblock]$OnOutput,
-        [switch]$LowResource            # Slow Machine Mode: single-threaded, capped compression level
+        [switch]$LowResource,           # Slow Machine Mode: single-threaded, capped compression level
+        [ValidateSet('OnComplete', 'Instant')][string]$TransferMode = 'OnComplete'
     )
 
     # 7-Zip's -v (volumes) switch only splits the native 7z container - it
@@ -408,7 +415,43 @@ function New-A4950Archive {
         Output      = ''
     }
 
-    $run = Invoke-A4950Process -FilePath $SevenZipPath -Arguments $szArgs -CancelCheck $CancelCheck
+    # Instant transfer mode: while 7-Zip is still running, poll for volumes it
+    # has already finished writing and report them via -OnPartReady right
+    # away, instead of waiting for the whole archive. 7-Zip's own writing
+    # behaviour makes this safe: each volume is written to a "<name>.tmp"
+    # file and only renamed to its final "<base>.7z.NNN" name once its
+    # content is completely flushed and will never be touched again -
+    # confirmed empirically against real 7-Zip 23.01, timestamping every
+    # volume rename during a live multi-volume compress. The one volume this
+    # can never speed up is .001: 7-Zip defers finalising it until the very
+    # end (the archive's start header can only be written once the whole
+    # body is known), at the same instant as the last volume - so .001 is
+    # always excluded here and only ever reported in the final batch below,
+    # which also matches the existing "always transfer .001 last" behaviour.
+    # A same-name volume is never reported twice: $reportedVols is checked
+    # again in the final batch below, after 7-Zip has fully exited.
+    $reportedVols = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $onTick = $null
+    if ($TransferMode -eq 'Instant' -and $VolumeSizeMB -gt 0 -and $OnPartReady) {
+        $onTick = {
+            $found = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.\d{3}$' -and $_.Name -notmatch '\.001$' -and -not $reportedVols.Contains($_.Name) }
+            foreach ($f in $found) {
+                # Defense in depth beyond the .tmp-name signal above: confirm
+                # nothing else still has the file open for writing before
+                # treating it as safe to move. Best-effort - reliable file
+                # locking semantics are OS-specific, so this is a second
+                # check on top of (never a replacement for) the rename signal.
+                $locked = $true
+                try { ([System.IO.File]::Open($f.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)).Dispose(); $locked = $false } catch {}
+                if ($locked) { continue }
+                [void]$reportedVols.Add($f.Name)
+                & $OnPartReady $f.FullName
+            }
+        }.GetNewClosure()
+    }
+
+    $run = Invoke-A4950Process -FilePath $SevenZipPath -Arguments $szArgs -CancelCheck $CancelCheck -OnTick $onTick
     $result.ExitCode  = $run.ExitCode
     $result.Output    = $run.Output
     $result.Cancelled = $run.Cancelled
@@ -420,17 +463,18 @@ function New-A4950Archive {
         return $result
     }
 
-    # 7z's own -v volumes (or an unsplit archive) are only known to exist, and
-    # only guaranteed complete, once 7z.exe has fully exited - the process is
-    # a black box while running, and 7-Zip does not necessarily finalise
-    # volumes in ascending numeric order internally (e.g. the FIRST volume
-    # can be the LAST one it finishes writing), so there is no safe way to
-    # start transferring any of its volumes early. All produced files are
-    # reported via -OnPartReady together, in one batch, only after the
-    # process has completed. Volumes are left exactly as 7-Zip names them -
-    # "<base>.7z.001", "<base>.7z.002", ... - so the on-disk name always
-    # signals the real container format, and a receiver testing them with
-    # `7z t`/`7z l` gets 7-Zip's own genuine, verified volume count.
+    # Final, authoritative pass: every volume (or the unsplit archive) is only
+    # KNOWN to exist, and only guaranteed complete, once 7z.exe has fully
+    # exited - the process is a black box while running. In OnComplete mode
+    # (the default) nothing was reported above, so every volume is reported
+    # here, together, in one batch. In Instant mode most volumes were already
+    # reported live as 7-Zip finished each one (see $onTick above); this pass
+    # picks up whatever wasn't - always including .001, and covering the
+    # OnComplete case identically to before. Volumes are left exactly as
+    # 7-Zip names them - "<base>.7z.001", "<base>.7z.002", ... - so the
+    # on-disk name always signals the real container format, and a receiver
+    # testing them with `7z t`/`7z l` gets 7-Zip's own genuine, verified
+    # volume count.
     if ($VolumeSizeMB -gt 0) {
         $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
@@ -439,7 +483,12 @@ function New-A4950Archive {
     } else {
         if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
     }
-    if ($OnPartReady) { foreach ($f in $result.Files) { & $OnPartReady $f } }
+    if ($OnPartReady) {
+        foreach ($f in $result.Files) {
+            if ($reportedVols.Contains((Split-Path -Leaf $f))) { continue }   # already reported live, above
+            & $OnPartReady $f
+        }
+    }
 
     # 7-Zip exit codes: 0 = OK, 1 = warning (still usable).
     $result.Success = ($result.ExitCode -in 0, 1) -and ($result.Files.Count -gt 0)
