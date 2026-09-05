@@ -25,6 +25,7 @@ optional pass number.
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
+| Job queue | **Add to Queue** snapshots the current selection, identifiers and Options into a queue entry, then clears the screen to build the next one. **Start Queue** runs queued jobs one after another automatically. Each entry has its own **Edit** (recall it onto the screen to change anything) and **Remove** (cancel it outright); **Stop Queue** halts auto-advance without touching whatever job is currently running |
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
 | Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
@@ -110,7 +111,9 @@ Or right-click either `.ps1` and choose **Run with PowerShell**.
    (or leave "Select all folders/files by default" on in Options to add the
    whole drive automatically on insert).
 3. Enter **either** a CMS case (e.g. `CMS-A12345`) **or** an **UPPERCASE** OP name.
-4. Click **Start Capture** and confirm the summary.
+4. Click **Start Capture** and confirm the summary — or click **Add to Queue**
+   to queue this job and build the next one instead of starting right away;
+   see [Job queue](#job-queue) below.
 
 All options — including **sizing/volume split** — live in the **Options** panel on
 the main screen; **Save Options** persists them.
@@ -193,6 +196,38 @@ listing every original file's size, timestamp and SHA-256 / MD5 hash, with
 each entry prefixed by its original top-level folder name (e.g.
 `Photos\IMG001.jpg`) — or left unprefixed if that item was an individually
 selected file rather than a folder.
+
+#### Job queue
+
+> This tool runs **one capture job at a time** — the job queue doesn't change
+> that, it just lines several jobs up to take their turn automatically
+> instead of needing a click between each one.
+>
+> - **Add to Queue** — snapshots the current selection, CMS case/OP/pass
+>   **and every Options setting** into a queue entry, then clears the screen
+>   so you can build the next job. Because the snapshot is a full copy, a
+>   later change to Options can never retroactively change a job that's
+>   already queued — each queued job runs with exactly the settings it had
+>   when it was queued, even if you change Options (or Quick Transfer, or
+>   Slow Machine Mode) before it's its turn.
+> - **Start Queue** — runs queued jobs one after another, front of the queue
+>   first, automatically starting the next one as soon as each finishes. No
+>   confirmation dialog interrupts an auto-started job (it was already
+>   reviewed when queued) — the same summary information is still logged.
+> - **Edit** (per queued job) — pulls that job back out of the queue onto
+>   the main screen (selection, identifiers, Options and all) so you can
+>   change anything, then either **Start Capture** it immediately or
+>   **Add to Queue** it again.
+> - **Remove** (per queued job) — cancels it outright; it's gone and will
+>   never run.
+> - **Stop Queue** — stops auto-advance only. Whatever job is currently
+>   running keeps running to completion (use the ordinary **Cancel** button
+>   for that); once stopped, no further queued job starts by itself until
+>   you click **Start Queue** again.
+>
+> A queued job still can't start while another job (queued or manually
+> started) is already running — the queue takes turns, it doesn't run jobs
+> concurrently.
 
 ---
 

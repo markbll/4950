@@ -73,6 +73,8 @@ $script:WorkerHandle = $null
 $script:LastJobStaging = $null   # local staging folder of the last completed job, for "Delete Local Copies"
 $script:SuppressDriveBrowse = $false   # true while Update-DriveList sets CmbDrive programmatically
 $script:SlowMachineMode = $false
+$script:JobQueue     = New-Object System.Collections.Generic.List[object]   # pending [pscustomobject]@{Id;CaseText;OpText;PassText;Name;Items;Config}
+$script:QueueRunning = $false   # true once "Start Queue" is clicked, until stopped or the queue empties
 
 # ----------------------------------------------------------------------------
 # XAML - user interface definition
@@ -340,18 +342,36 @@ $script:SlowMachineMode = $false
         </Grid>
       </Border>
 
-      <!-- Activity log -->
+      <!-- Activity log + job queue -->
       <Border Grid.Column="3" Style="{StaticResource Card}">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="2*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*"/>
           </Grid.RowDefinitions>
           <TextBlock Grid.Row="0" Text="REAL-TIME ACTIVITY LOG" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,8"/>
           <Border Grid.Row="1" Background="#FF14141A" CornerRadius="6">
             <RichTextBox x:Name="TxtLog" Background="Transparent" Foreground="#FFD4D4D4" BorderThickness="0" Padding="8"
                          FontFamily="Consolas" FontSize="13" IsReadOnly="True"
                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+          </Border>
+
+          <Grid Grid.Row="2" Margin="0,10,0,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="JOB QUEUE" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+              <TextBlock x:Name="LblQueueCount" Text="0 job(s) queued" Foreground="{StaticResource Muted}" FontSize="11"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+              <Button x:Name="BtnStartQueue" Content="Start Queue" Background="#FF2E7D32" IsEnabled="False"/>
+              <Button x:Name="BtnStopQueue"  Content="Stop Queue" Background="#FF8E2A2A" IsEnabled="False"/>
+            </StackPanel>
+          </Grid>
+          <Border Grid.Row="3" Background="#FF14141A" CornerRadius="6">
+            <ListBox x:Name="LstQueue" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
           </Border>
         </Grid>
       </Border>
@@ -367,6 +387,7 @@ $script:SlowMachineMode = $false
         <TextBlock x:Name="LblDest" Grid.Column="0" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
                    Text="Destination: (configure in the Options panel)"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <Button x:Name="BtnAddQueue" Content="Add to Queue" Background="#FF3A3A80"/>
           <Button x:Name="BtnStart"  Content="Start Capture" Background="#FF2E7D32" FontSize="14"/>
           <Button x:Name="BtnCancel" Content="Cancel" Background="#FF8E2A2A" IsEnabled="False"/>
         </StackPanel>
@@ -580,6 +601,207 @@ function Clear-Selection {
     $script:SelectedItems.Clear()
     $ctrl.LstItems.Items.Clear()
     Update-SelectionCount
+}
+
+# ----------------------------------------------------------------------------
+# Job queue: several capture jobs queued up to run one after another
+# automatically. Each entry snapshots everything a job needs to run
+# independently of whatever is currently on screen - selection, CMS
+# case/OP/pass, and a full copy of the options in effect when it was queued -
+# so later Options changes (or even another queued job's Edit) can never
+# retroactively change a job that's already queued. Queued jobs are run by
+# temporarily loading that snapshot onto the main screen and driving the
+# existing single-job Start-Capture path unchanged - no separate execution
+# code path to keep in sync.
+# ----------------------------------------------------------------------------
+function Update-QueueCount {
+    $ctrl.LblQueueCount.Text = "$($script:JobQueue.Count) job(s) queued"
+}
+
+function Copy-OrderedConfig {
+    # [ordered]@{} (an OrderedDictionary) has no .Clone() PowerShell can see,
+    # so build a new one by hand. Shallow is fine: Sync-OptionsToConfig always
+    # replaces array-valued fields (HashAlgorithms, ExcludePatterns) wholesale
+    # rather than mutating one in place, so a later edit to the live $config
+    # can never reach back into an already-queued snapshot's arrays.
+    param($Source)
+    $copy = [ordered]@{}
+    foreach ($k in $Source.Keys) { $copy[$k] = $Source[$k] }
+    return $copy
+}
+
+function Get-QueueIndexById {
+    param([string]$Id)
+    for ($i = 0; $i -lt $script:JobQueue.Count; $i++) { if ($script:JobQueue[$i].Id -eq $Id) { return $i } }
+    return -1
+}
+
+function New-QueueListRow {
+    param($Entry)
+    $row = New-Object System.Windows.Controls.Grid
+    $row.Margin = '2,3'
+    foreach ($w in @([System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star), [System.Windows.GridLength]::Auto, [System.Windows.GridLength]::Auto)) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$row.ColumnDefinitions.Add($cd)
+    }
+
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = "$($Entry.Name)  -  $($Entry.Items.Count) item(s)"
+    $label.Foreground = $window.FindResource('Text')
+    $label.TextTrimming = 'CharacterEllipsis'
+    $label.ToolTip = ($Entry.Items | ForEach-Object { $_.Path }) -join "`n"
+    $label.VerticalAlignment = 'Center'
+    [System.Windows.Controls.Grid]::SetColumn($label, 0)
+
+    $editBtn = New-Object System.Windows.Controls.Button
+    $editBtn.Content = 'Edit'
+    $editBtn.Padding = '8,2'
+    $editBtn.Margin = '8,0,2,0'
+    $editBtn.FontSize = 11
+    $editBtn.Tag = $Entry.Id
+    $editBtn.Add_Click({ param($s, $e) Edit-QueuedJob -Id $s.Tag }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($editBtn, 1)
+
+    $removeBtn = New-Object System.Windows.Controls.Button
+    $removeBtn.Content = 'Remove'
+    $removeBtn.Padding = '8,2'
+    $removeBtn.Margin = '2,0,2,0'
+    $removeBtn.FontSize = 11
+    $removeBtn.Tag = $Entry.Id
+    $removeBtn.Add_Click({ param($s, $e) Remove-QueuedJob -Id $s.Tag }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($removeBtn, 2)
+
+    [void]$row.Children.Add($label)
+    [void]$row.Children.Add($editBtn)
+    [void]$row.Children.Add($removeBtn)
+    return $row
+}
+
+function Add-ToQueue {
+    # Same pre-flight checks Start-Capture itself does, run up front (while an
+    # operator is actually present to see and fix them) rather than only
+    # discovered later when the queue auto-advances unattended.
+    Sync-OptionsToConfig
+    $tn = Get-TransferName
+    if (-not $tn.Ok) { [System.Windows.MessageBox]::Show($tn.Reason, 'Identifier required', 'OK', 'Warning') | Out-Null; return }
+    $issues = Test-A4950Config -Config $config
+    if ($issues.Count) { [System.Windows.MessageBox]::Show(($issues -join "`n"), 'Configuration problems', 'OK', 'Warning') | Out-Null; return }
+    $items = Get-SelectedItemPaths
+    if ($items.Count -eq 0) { [System.Windows.MessageBox]::Show('Select at least one folder or file to add to the queue.', 'Nothing selected', 'OK', 'Warning') | Out-Null; return }
+
+    $entry = [pscustomobject]@{
+        Id       = [guid]::NewGuid().ToString()
+        CaseText = $ctrl.TxtCase.Text
+        OpText   = $ctrl.TxtOp.Text
+        PassText = $ctrl.TxtPass.Text
+        Name     = $tn.Name
+        Items    = @($script:SelectedItems | ForEach-Object { [pscustomobject]@{ Path = $_.Path; IsFolder = $_.IsFolder } })
+        Config   = Copy-OrderedConfig -Source $config
+    }
+    $script:JobQueue.Add($entry)
+    [void]$ctrl.LstQueue.Items.Add((New-QueueListRow -Entry $entry))
+    Update-QueueCount
+    $ctrl.BtnStartQueue.IsEnabled = (-not $script:QueueRunning)
+    Add-LogLine "Added to queue: $($entry.Name) ($($entry.Items.Count) item(s))." 'OK'
+
+    # Clear the current job spec so the operator can build the next one - the
+    # Options panel (destination, compression, etc.) is left as-is since
+    # that's shared, ambient state, not something tied to one job.
+    Clear-Selection
+    $ctrl.TxtCase.Text = $config.CasePrefix
+    $ctrl.TxtOp.Text = ''
+    $ctrl.TxtPass.Text = ''
+    Update-NamePreview
+}
+
+function Remove-QueuedJob {
+    param([string]$Id)
+    $idx = Get-QueueIndexById -Id $Id
+    if ($idx -lt 0) { return }
+    $entry = $script:JobQueue[$idx]
+    $script:JobQueue.RemoveAt($idx)
+    $ctrl.LstQueue.Items.RemoveAt($idx)
+    Update-QueueCount
+    $ctrl.BtnStartQueue.IsEnabled = (-not $script:QueueRunning -and $script:JobQueue.Count -gt 0)
+    Add-LogLine "Removed from queue: $($entry.Name)." 'INFO'
+}
+
+function Restore-QueueEntryToScreen {
+    # Shared by Edit-QueuedJob and Start-NextQueuedJob: load a queued entry's
+    # snapshot onto the main screen exactly as if the operator had built it
+    # by hand - selection, case/OP/pass, and every Options field.
+    param($Entry)
+    Clear-Selection
+    foreach ($it in $Entry.Items) { Add-SelectedItem -Path $it.Path -IsFolder $it.IsFolder | Out-Null }
+    $ctrl.TxtCase.Text = $Entry.CaseText
+    $ctrl.TxtOp.Text   = $Entry.OpText
+    $ctrl.TxtPass.Text = $Entry.PassText
+    # Mutate the existing $config object in place (rather than reassigning
+    # the variable) - every other function in this script closes over this
+    # same object by reference, so a reassignment here would not be seen
+    # elsewhere.
+    $config.Clear()
+    foreach ($k in $Entry.Config.Keys) { $config[$k] = $Entry.Config[$k] }
+    Set-OptionsFromConfig
+    Set-SlowMachineMode -On ([bool]$config.SlowMachineMode)
+    Update-Footer
+    Update-NamePreview
+}
+
+function Edit-QueuedJob {
+    param([string]$Id)
+    $idx = Get-QueueIndexById -Id $Id
+    if ($idx -lt 0) { return }
+    $entry = $script:JobQueue[$idx]
+    $script:JobQueue.RemoveAt($idx)
+    $ctrl.LstQueue.Items.RemoveAt($idx)
+    Update-QueueCount
+    $ctrl.BtnStartQueue.IsEnabled = (-not $script:QueueRunning -and $script:JobQueue.Count -gt 0)
+
+    Restore-QueueEntryToScreen -Entry $entry
+    Add-LogLine "Recalled from queue for editing: $($entry.Name). Adjust the fields/options, then Start Capture or Add to Queue again." 'INFO'
+}
+
+function Start-JobQueue {
+    if ($script:JobQueue.Count -eq 0) { Add-LogLine 'Queue is empty - nothing to start.' 'WARN'; return }
+    if ($script:QueueRunning) { return }
+    $script:QueueRunning = $true
+    $ctrl.BtnStartQueue.IsEnabled = $false
+    $ctrl.BtnStopQueue.IsEnabled  = $true
+    Add-LogLine "Queue started: $($script:JobQueue.Count) job(s) queued." 'STEP'
+    Start-NextQueuedJob
+}
+
+function Stop-JobQueue {
+    if (-not $script:QueueRunning) { return }
+    $script:QueueRunning = $false
+    $ctrl.BtnStartQueue.IsEnabled = ($script:JobQueue.Count -gt 0)
+    $ctrl.BtnStopQueue.IsEnabled  = $false
+    Add-LogLine 'Queue stopped - any job already in progress will still finish, but no further queued jobs will start automatically.' 'WARN'
+}
+
+function Start-NextQueuedJob {
+    # Called both by Start-JobQueue and, on the 'done' event, right after
+    # each job wraps up, so the queue advances itself without needing the
+    # operator to click anything between jobs.
+    if (-not $script:QueueRunning) { return }
+    if ($script:Shared.Running) { return }   # something (queue or manual) is already running - this will be called again once it finishes
+    if ($script:JobQueue.Count -eq 0) {
+        $script:QueueRunning = $false
+        $ctrl.BtnStartQueue.IsEnabled = $false
+        $ctrl.BtnStopQueue.IsEnabled  = $false
+        Add-LogLine 'Queue complete - no more queued jobs.' 'OK'
+        return
+    }
+    $entry = $script:JobQueue[0]
+    $script:JobQueue.RemoveAt(0)
+    $ctrl.LstQueue.Items.RemoveAt(0)
+    Update-QueueCount
+
+    Restore-QueueEntryToScreen -Entry $entry
+    Add-LogLine "Queue: starting next job - $($entry.Name) ($($entry.Items.Count) item(s))." 'STEP'
+    Start-Capture -NoConfirm
 }
 
 function Add-BrowsedFolder {
@@ -1053,7 +1275,13 @@ function Get-StagingSpaceGuide {
 
 function Start-Capture {
     param([switch]$NoConfirm)
-    if ($script:Shared.Running) { return }
+    if ($script:Shared.Running) {
+        # -NoConfirm calls (queue auto-advance) already check this themselves
+        # before calling in, so this only ever fires for a manual click while
+        # a job - queued or not - is already running.
+        if (-not $NoConfirm) { Add-LogLine 'A job is already running - wait for it to finish, or Cancel it, before starting another.' 'WARN' }
+        return
+    }
 
     # Apply the on-screen options first so the capture uses current settings.
     Sync-OptionsToConfig
@@ -1274,6 +1502,7 @@ $pumpTimer.Add_Tick({
                     }
                 }
                 Complete-Capture
+                if ($script:QueueRunning) { Start-NextQueuedJob }   # auto-advance to the next queued job, if any
             }
         }
     }
@@ -1360,7 +1589,9 @@ WORKFLOW
      name (e.g. $($config.CasePrefix)12345_JBLOGGS_PASS4471) - if both CMS case
      and OP name are entered, both are used.
   3. Press "Start Capture" and confirm the summary (which lists the folders, the
-     destination and the zip names).
+     destination and the zip names) - or press "Add to Queue" to queue this
+     job and build another one instead of starting immediately; see JOB
+     QUEUE below.
   4. When the job finishes, the Activity Log (and the transfer-finished popup)
      shows the destination path and the name of every file written there.
 
@@ -1385,6 +1616,34 @@ CANCEL
   of a second and deletes the temp files. Any archives already copied stay on
   the share, and a "FAILED TRANSFER" log listing them (with hashes and times)
   is written and sent to the destination.
+
+JOB QUEUE
+  Line up several capture jobs to run one after another, unattended, instead
+  of starting each one by hand:
+  1. Build a selection and enter a CMS case/OP/pass as normal, then click
+     "Add to Queue" instead of "Start Capture". This snapshots the current
+     selection, identifiers AND every Options setting into a queue entry -
+     later changes to Options can never retroactively change an already-
+     queued job - then clears the screen so you can build the next one.
+  2. Click "Start Queue" once you've queued everything. Jobs run one at a
+     time, in the order queued; as soon as one finishes, the next one starts
+     automatically - no need to click anything in between.
+  3. Each queued job has its own "Edit" and "Remove" buttons:
+       - "Remove" cancels that queued job outright - it's gone, nothing
+         about it will ever run.
+       - "Edit" pulls it back out of the queue onto the main screen (its
+         selection, identifiers and Options are all reloaded) so you can
+         change anything, then either "Start Capture" it immediately or
+         "Add to Queue" again.
+  4. "Stop Queue" stops the AUTO-ADVANCE only - whatever job is currently
+     running keeps running (or use "Cancel" for that, same as any other
+     job) - it just means nothing further starts automatically once it's
+     done. Click "Start Queue" again later to resume from wherever the
+     queue was left.
+  A job already running (queued or started by hand) still blocks a second
+  one from starting at the same time - this tool runs one capture job at a
+  time, queued jobs just take turns automatically rather than needing a
+  click each time.
 
 STAGING SPACE GUIDE
   Before starting, the tool estimates the source size and logs it against the
@@ -1502,6 +1761,9 @@ $ctrl.BtnHelp.Add_Click({ Show-Help })
 $ctrl.BtnQuick.Add_Click({ Set-QuickTransfer })
 $ctrl.BtnStart.Add_Click({ Start-Capture })
 $ctrl.BtnCancel.Add_Click({ Stop-Capture })
+$ctrl.BtnAddQueue.Add_Click({ Add-ToQueue })
+$ctrl.BtnStartQueue.Add_Click({ Start-JobQueue })
+$ctrl.BtnStopQueue.Add_Click({ Stop-JobQueue })
 $ctrl.BtnClearSelection.Add_Click({ Clear-Selection })
 $ctrl.BtnSaveOptions.Add_Click({ Save-Options })
 $ctrl.BtnBrowseNet.Add_Click({ $p = Select-Folder 'Select the destination folder (UNC share or local path)' $ctrl.OptNet.Text; if ($p) { $ctrl.OptNet.Text = $p } })

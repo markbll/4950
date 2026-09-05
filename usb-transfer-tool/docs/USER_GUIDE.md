@@ -47,9 +47,13 @@ detects this and will tell you.
 │ Memory          │ OP Name (UPPERCASE)  │ Format / Split size │ colour-coded          │
 │ Network Mbps    │ Pass Number          │ Level / Hashing     │ events                │
 │ Temp free space │ Drive ▼ [Refresh]    │ ...all options...   │                       │
-│ Job progress    │ [Browse][Add Files]  │ [ Save Options ]    │                       │
+│ Job progress    │ [Browse][Add Files]  │ [ Save Options ]    ├ Job Queue ────────────┤
+│                 │                      │                     │ 2 job(s) queued       │
+│                 │                      │                     │ [Start Queue][Stop]   │
+│                 │                      │                     │ JobA - Edit - Remove  │
+│                 │                      │                     │ JobB - Edit - Remove  │
 ├─────────────────┴──────────────────────┴─────────────────────┴───────────────────────┤
-│ Destination: C:\Destination...        [Start Capture]  [Cancel]                       │
+│ Destination: C:\Destination...   [Add to Queue] [Start Capture]  [Cancel]              │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -165,6 +169,8 @@ see exactly what landed where without opening the destination folder.
 3. Click **Start Capture**. The tool logs a **staging space guide** (see
    below) and shows a confirm summary dialog listing every selected item's
    full source path, the destination folder and the resulting archive names.
+   Or click **Add to Queue** to queue this job and build another one instead
+   of starting immediately — see [Job queue](#job-queue) below.
 4. A **"Transfer in progress"** window opens, mirroring the activity log and
    showing compress/transfer progress and a running transferred-file count.
 5. Watch the **activity log**:
@@ -189,8 +195,8 @@ less than typical documents.
    folder name.
 2. **Compress** everything together with 7-Zip into ONE archive, **embedding
    the manifest**.
-3. As soon as that archive (or its volumes) finishes writing, it is **queued
-   for transfer** to the destination.
+3. The archive (or its volumes) is **queued for transfer** to the
+   destination per the "Archive volume transfer" setting — see § 4.
 4. **Transfer** via robocopy (retry/resume) to `<dest>\<CASE>\<CASE>.<fmt>`.
    A destination file name clash is never overwritten — a date/time is
    appended instead.
@@ -216,6 +222,36 @@ partial output has no evidentiary value and is cleaned up automatically.
 fraction of a second and deletes the temp files for the job. Archives already
 confirmed on the share stay there, and a "FAILED TRANSFER" log listing them
 (names, SHA-256, sizes, times) is written and sent to the destination.
+
+### Job queue
+This tool runs **one capture job at a time** — the job queue doesn't change
+that, it just lines several jobs up to take their turn automatically instead
+of needing a click between each one.
+
+- **Add to Queue** — snapshots the current selection, CMS case/OP/pass **and
+  every Options setting** into a queue entry, then clears the screen so you
+  can build the next job. Because it's a full snapshot, a later change to
+  Options (or Quick Transfer, or Slow Machine Mode) can never retroactively
+  change a job that's already queued — each one runs with exactly the
+  settings it had at the moment it was queued.
+- **Start Queue** — runs queued jobs one after another, front of the queue
+  first, automatically starting the next one the moment each finishes. No
+  confirmation dialog interrupts an auto-started job (it was already
+  reviewed when queued), but the same summary information is still logged.
+- **Edit** (per queued job, in the Job Queue list) — pulls that job back out
+  of the queue onto the main screen — selection, identifiers and Options all
+  reload — so you can change anything, then either **Start Capture** it
+  immediately or **Add to Queue** it again.
+- **Remove** (per queued job) — cancels it outright; it's gone and will
+  never run.
+- **Stop Queue** — stops auto-advance only. Whatever job is currently
+  running keeps running to completion (use the ordinary **Cancel** button
+  for that); no further queued job starts by itself until you click
+  **Start Queue** again.
+
+A queued job still can't start while another job — queued or manually
+started — is already running; the queue takes turns, it doesn't run jobs
+concurrently.
 
 ### Notification sounds
 The tool plays the Windows **Critical Stop** sound the moment any error is
