@@ -3,7 +3,8 @@
 A Windows PowerShell + WPF application that watches for USB drives, hashes their
 contents for chain-of-custody, compresses everything with **7-Zip** into a
 single combined archive, and transfers it to a destination — all tagged with a
-**CMS case number**, OP name and/or pass number.
+**CMS case number** and/or OP name (one of the two is required), plus an
+optional pass number.
 
 > Designed for evidence/collection style workflows where integrity (SHA-256 /
 > MD5) and a clear audit trail matter.
@@ -14,33 +15,38 @@ single combined archive, and transfers it to a destination — all tagged with a
 
 | Requirement | How it's delivered |
 |---|---|
-| Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is scanned and listed on insert |
+| Detect new USB drives | WMI `Win32_VolumeChangeEvent` watcher; the drive is detected on insert |
 | Prompt before acting | Yes/No dialog on insert (`AutoPromptOnInsert`), plus a final confirm |
-| Auto-transfer | Tick-box: start automatically on insert, needing only a CMS case, OP name **or** pass number |
-| Choose folders/files/drives | Checkbox tree with **selectable sub-folders/files**; Select All / **Deselect All clears every level**; drive Refresh |
-| Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
+| Choose folders/files | Built entirely from standard Windows dialogs - **Browse Folders...** (folder browser, looped so several folders can be added in one flow; each captured recursively, in full) and **Add Files...** (multi-select file picker) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
+| Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. Picking a drive from this dropdown by hand opens a folder browser rooted at that drive so you can pick a folder/sub-folder straight from it. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
+| Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the archive names |
+| Completion summary | When a job finishes, an on-screen message shows the Source and Destination locations, start/finish time, number of files/folders and original vs. compressed size — in addition to the destination path and file names logged to the Activity Log and the "Transfer finished" popup |
+| Slow Machine Mode | Header button for old/low-spec hardware: turns off the System Monitor's CPU/Memory/Network/Temp polling and forces single-threaded, store-only (no compression math) 7-Zip — trades speed for the smallest possible CPU/RAM footprint. Hashing and the manifest are unaffected |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
-| CMS / OP / Pass in the name | CMS case (`CMS-A…`), **UPPERCASE** OP name, and operator **pass number** are combined into the folder/archive name |
-| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
+| Job queue | **Add to Queue** snapshots the current selection, identifiers and Options into a queue entry, then clears the screen to build the next one. **Start Queue** runs queued jobs one after another automatically. Each entry has its own **Edit** (recall it onto the screen to change anything) and **Remove** (cancel it outright); **Stop Queue** halts auto-advance without touching whatever job is currently running |
+| CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
+| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
-| Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password |
-| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file |
+| Compress with 7-Zip | `7z.exe`, level 0–9, always native **7z** format, optional AES-256 password, **multi-threaded** (`-mmt=on`) |
+| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file. **A split always uses native 7z volumes** — see [Archives are always native 7z](#archives-are-always-native-7z) below |
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
-| Transfer to a destination | UNC share or local folder; robocopy with Copy-Item fallback |
+| Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Transfer starts as soon as it's ready | For a split `zip`, each volume (`.001`, `.002`, …) begins transferring the instant it's fully written — no need to wait for the rest. `7z` volumes and unsplit archives transfer once the whole file is confirmed complete |
+| Archive volume transfer mode | Options choice for a split archive, under the **ARCHIVE VOLUME TRANSFER** heading: **Transfer Immediately** (default — each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest) or **Wait for All Files** (safest — waits for the whole archive). Quick Transfer always turns Immediate on. Un-split archives are unaffected either way — see [Archives are always native 7z](#archives-are-always-native-7z) below |
+| `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — true in both transfer modes, since 7-Zip itself only finalises `.001` at the very end of the run regardless. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
-| Temp cleanup on success | Each file is removed from staging once its transfer is **confirmed** (copied, and hash-verified if verification is on); the whole temp job folder is swept at the end once *everything* is confirmed. Nothing is deleted if a file failed or failed verification |
+| Local copies always kept | Nothing is auto-deleted after a completed job — remove local copies manually, or with **Delete Local Copies** on the transfer-finished window (confirms first). A cancelled job's partial output is still cleaned up automatically |
 | Failed-transfer log | If some files were already sent, a "FAILED TRANSFER" log (names, hashes, times) is written and sent |
-| Destination space check | Before starting, estimates the source size vs. destination free space; if it looks tight, suggests a compression level/format estimated to fit (or lets you continue/cancel) |
+| Staging space guide | Before starting, estimates the source size vs. **local staging** free space only (never the destination, to avoid slow-link latency). Non-blocking: a shortfall just logs a warning and the job proceeds automatically |
 | Full-screen GUI | The window opens maximised |
 | Collapsible Options | "Hide Options" in the header collapses the Options panel, giving the Activity Log more room |
 | Real-time events/log | Colour-coded activity log (auto-scrolls) with hashes, file names, dates/times; per-case `.log` file |
-| Post-transfer verification | Re-hash the archive at the destination (SHA-256 match) |
-| Notification sounds | An audible chime on a clean finish, and an alert sound on any error — Windows system sounds, respecting your OS volume/mute |
+| Notification sounds | A sound plays on start, on a clean finish, and on any error. Pick your own `.wav` per event in Options → **SOUNDS**, or leave any of them blank to fall back to a standard Windows sound (Beep / Asterisk / Hand), respecting your OS volume/mute |
+| Enhanced log & transfer-log detail | Start time, finish time, number of files, number of folders, and total (original) vs. compressed ("zipped") size are recorded in the Activity Log, the worker log and the `TRANSFER.log` sent to the destination |
+| Text size & Dark Mode | Options → **APPEARANCE**: choose Small / Medium / Large / Extra Large text size, and toggle Dark Mode on/off — both apply immediately, no restart needed |
 
 ---
 
@@ -101,39 +107,125 @@ powershell -ExecutionPolicy Bypass -File .\Start-Auto4950.ps1
 
 Or right-click either `.ps1` and choose **Run with PowerShell**.
 
-1. Connect a USB drive → it is **scanned** and its folders/files are listed.
-2. Tick what to capture (all pre-selected); use **Select All** / **Deselect All**.
+1. Connect a USB drive → it's detected and available in the "Source drive" list.
+2. Click **Browse Folders...** and/or **Add Files...** to build the selection
+   (or leave "Select all folders/files by default" on in Options to add the
+   whole drive automatically on insert).
 3. Enter **either** a CMS case (e.g. `CMS-A12345`) **or** an **UPPERCASE** OP name.
-4. Click **Start Capture** and confirm — or tick **Auto-transfer** to skip the
-   prompts and start automatically whenever a drive is plugged in (it just needs
-   a CMS case or OP name to already be filled in).
+4. Click **Start Capture** and confirm the summary — or click **Add to Queue**
+   to queue this job and build the next one instead of starting right away;
+   see [Job queue](#job-queue) below.
 
 All options — including **sizing/volume split** — live in the **Options** panel on
 the main screen; **Save Options** persists them.
 
-Output at the destination (default: `zip` format, split into 2 GB volumes;
-everything selected is always combined into ONE archive):
+Output at the destination (native **7z** format, split into 2 GB volumes by
+default; everything selected is always combined into ONE archive). Files
+land **directly in the destination — no per-case sub-folder** — so the name
+itself carries the CMS case and/or OP name, pass number if given, and this
+job's timestamp, keeping every job's files unique there:
 
 ```
-C:\Destination\CMS-A12345\
-    CMS-A12345.zip.001      (volume 1 – incl. embedded manifest covering everything selected)
-    CMS-A12345.zip.002      (volume 2)
+C:\Destination\
+    CMS-A12345_20260818_143000.7z.001      (volume 1 – incl. embedded manifest covering everything selected)
+    CMS-A12345_20260818_143000.7z.002      (volume 2)
 ```
 
-> When **split** is off (`VolumeSizeMB = 0`) you get a single file, e.g.
-> `CMS-A12345.zip`. Reassemble volumes by opening the `.001` file in 7-Zip (all
-> parts must be in the same folder) — or, without 7-Zip, concatenate the parts
-> in order: `copy /b CMS-A12345.zip.001+CMS-A12345.zip.002 CMS-A12345.zip`.
+> When **split** is off (`VolumeSizeMB = 0`) you get a single file instead:
+> `CMS-A12345_20260818_143000.7z`.
+
+#### Archives are always native 7z
+
+> Every archive — split or not — is built as native **7z**, requiring 7-Zip
+> (or a compatible tool) at the receiving end to open. This isn't a
+> preference, it's a correctness fix for splitting specifically: 7-Zip's own
+> volume switch (`-v`) only splits its native `.7z` container — it silently
+> ignores `-v` for `.zip` (writes one whole file and exits 0 as if nothing
+> were wrong). An earlier version of this tool worked around that by
+> raw-byte-splitting a finished `.zip` itself into `.001`/`.002`/… parts. That
+> turned out to be a real integrity risk: 7-Zip only ever reports a genuine,
+> checked volume count (`Volumes = N`) for its *own* native multi-volume
+> format — tested against a raw-byte-split zip with a part deliberately
+> withheld, `7z l` still happily reported the **wrong**, present-file-count
+> "Volumes = N" as if that were the true total, rather than failing. A
+> receiving tool that trusts that number (rather than requiring a full `7z t`
+> pass with 7-Zip's own "Everything is Ok") could act on a truncated result
+> without any error ever being raised. Native 7z volumes don't have this gap:
+> `7z l`/`7z t`/`7z x` against a real multi-volume 7z archive **only** report
+> a volume count — or succeed at all — once every volume is genuinely present
+> (verified against the archive's real end-of-archive header); given a
+> partial set they fail outright with a non-zero exit code and "Unexpected
+> end of archive", every time.
 >
-> 7-Zip's own volume switch only splits its native `.7z` format — it silently
-> ignores splitting for `.zip`. So for `zip` archives, this tool builds the
-> complete archive first and then splits it itself into `.001`/`.002`/… parts
-> (the same raw sequential-byte layout 7-Zip's own volumes use), so the split
-> size setting works for **both** archive formats.
+> Reassemble by opening the `.001` file in 7-Zip (all parts must be in the
+> same folder), or from the command line: `7z x CMS-A12345_20260818_143000.7z.001`.
+> Plain `copy /b`/`cat` concatenation does **not** work for native 7z volumes
+> — you need 7-Zip (or a compatible tool like `7-Zip-zstd`/`p7zip`/`py7zr`) at
+> the receiving end to open a split delivery.
+>
+> **Archive volume transfer mode** (Options → "ARCHIVE VOLUME TRANSFER",
+> only relevant when split) controls *when* each volume is picked up for
+> transfer:
+> - **Transfer Immediately** (default): each volume is picked up for
+>   transfer the moment 7-Zip finishes writing it, well before the rest of
+>   the archive is done. Verified against real 7-Zip 23.01: 7-Zip writes
+>   each volume to a `.tmp` file and only renames it to its final name once
+>   that volume's content is completely flushed and will never be touched
+>   again — that rename is the completion signal this mode watches for
+>   (with an exclusive-open probe as a second, best-effort check before
+>   treating a volume as safe to move).
+> - **Wait for All Files**: 7-Zip is a black box while running, so every
+>   volume is picked up for transfer together, only once the whole process
+>   has exited and every volume is confirmed complete.
+>
+> **`.001` is always the LAST volume to actually arrive at the destination,
+> in either mode.** Every other volume transfers as soon as it's ready (in
+> Instant mode) or as part of the completed batch (in Wait for All Files
+> mode), but `.001` is deliberately held back until they've all been queued — and this
+> isn't just a safety margin, it matches 7-Zip's own behaviour: confirmed
+> empirically, 7-Zip defers finalising volume `.001` until the exact same
+> instant as the very last volume, regardless of transfer mode, since the
+> archive's start header can only be written once the whole body is known.
+> You can't reassemble/open the set without it, so this stops a
+> still-incomplete transfer from looking usable.
 
-The archive embeds `CMS-A12345_MANIFEST.txt` and `.csv` listing every original
-file's size, timestamp and SHA-256 / MD5 hash, with each entry prefixed by its
-original top-level folder name (e.g. `Photos\IMG001.jpg`).
+The archive embeds `CMS-A12345_20260818_143000_MANIFEST.txt` and `.csv`
+listing every original file's size, timestamp and SHA-256 / MD5 hash, with
+each entry prefixed by its original top-level folder name (e.g.
+`Photos\IMG001.jpg`) — or left unprefixed if that item was an individually
+selected file rather than a folder.
+
+#### Job queue
+
+> This tool runs **one capture job at a time** — the job queue doesn't change
+> that, it just lines several jobs up to take their turn automatically
+> instead of needing a click between each one.
+>
+> - **Add to Queue** — snapshots the current selection, CMS case/OP/pass
+>   **and every Options setting** into a queue entry, then clears the screen
+>   so you can build the next job. Because the snapshot is a full copy, a
+>   later change to Options can never retroactively change a job that's
+>   already queued — each queued job runs with exactly the settings it had
+>   when it was queued, even if you change Options (or Quick Transfer, or
+>   Slow Machine Mode) before it's its turn.
+> - **Start Queue** — runs queued jobs one after another, front of the queue
+>   first, automatically starting the next one as soon as each finishes. No
+>   confirmation dialog interrupts an auto-started job (it was already
+>   reviewed when queued) — the same summary information is still logged.
+> - **Edit** (per queued job) — pulls that job back out of the queue onto
+>   the main screen (selection, identifiers, Options and all) so you can
+>   change anything, then either **Start Capture** it immediately or
+>   **Add to Queue** it again.
+> - **Remove** (per queued job) — cancels it outright; it's gone and will
+>   never run.
+> - **Stop Queue** — stops auto-advance only. Whatever job is currently
+>   running keeps running to completion (use the ordinary **Cancel** button
+>   for that); once stopped, no further queued job starts by itself until
+>   you click **Start Queue** again.
+>
+> A queued job still can't start while another job (queued or manually
+> started) is already running — the queue takes turns, it doesn't run jobs
+> concurrently.
 
 ---
 
@@ -159,46 +251,51 @@ See `config.example.json`. Key settings:
 
 - **NetworkShare** — destination (UNC share or local folder), default `C:\Destination`.
 - **SevenZipPath** — leave blank to auto-detect.
-- **ArchiveFormat** — `zip` (default, portable) or `7z` (smaller, AES-256).
-- All selected folders/files are always combined into **one** archive — this
-  is fixed behavior, not a setting.
+- All selected folders/files are always combined into **one** native 7z
+  archive — this is fixed behavior, not a setting.
 - **VolumeSizeMB** — split the archive into volumes of this size in MB
   (default **2048** = 2 GB); `0` = one file. Changeable in Setup **and** Settings.
 - **CompressionLevel** — `0` (store, fastest) … `9` (ultra, smallest).
 - **HashAlgorithms** — any of `SHA256`, `MD5`.
-- **VerifyAfterTransfer** — re-hash the archive at the destination.
-- **AutoTransfer** — start automatically on USB insert (needs a CMS case or OP name).
 - **StagingFolder** — local temp area for archives before transfer, default `C:\temp`.
-- **DeleteLocalArchive** — delete each staged file once its transfer is
-  **confirmed** (default **on**); the whole temp job folder is removed once every
-  file in the job is confirmed. Anything not confirmed (failed copy, failed
-  verification, or a cancelled job) is left in place for review.
+  Local copies are **always kept** here after a completed job - there's no
+  auto-delete setting. Remove them manually, or via **Delete Local Copies** on
+  the transfer-finished window, which prompts you to confirm the files have
+  reached their destination before deleting (a cancelled job's partial output
+  is still cleaned up automatically, since it has no evidentiary value).
 - **Password** — optional AES-256 archive password (prefer setting per-session
   in the Options panel rather than storing in plain text).
+- **SoundStartPath / SoundFinishPath / SoundErrorPath** — optional path to a
+  `.wav` file played on that event; blank uses the standard Windows sound
+  (Beep / Asterisk / Hand) instead.
+- **FontSize** — `Small`, `Medium` (default), `Large` or `ExtraLarge` — scales
+  all text in the app.
+- **DarkMode** — `true` (default) for the dark theme, `false` for light.
 
-### Destination free-space check
+### Staging space guide
 
 Before a capture starts, the tool sums the size of the selected items and
 compares it against an **estimate** of the compressed size at your current
-settings, then checks that estimate against the free space actually available
-at the destination (works for both UNC shares and local folders). If it looks
-like it won't fit:
+settings, then checks that estimate against the free space available in the
+**local staging folder only**. The destination is deliberately never probed
+here — over a slow link that round-trip just adds delay before the job can
+even start, for a number that's advisory at best.
 
-- **Auto-transfer** just logs a warning and continues — it never prompts.
-- **Manual start** shows a dialog with a suggested format/level expected to fit,
-  and lets you **apply it and continue**, **continue anyway**, or **cancel**.
+This is a **guide, not a gate**: it never blocks and never prompts. If it
+looks tight, a warning is logged and the job proceeds automatically
+regardless — parts stream out to the destination as soon as each is written,
+so staging was never going to need to hold the whole archive at once anyway.
 
 The compression estimate is a **planning heuristic only** — real compression is
 entirely data-dependent. Already-compressed media (photos, video, most zip/7z
 files) will shrink far less than the estimate suggests; the number is meant to
-catch an obvious shortfall, not to predict the exact archive size.
+flag an obvious shortfall, not to predict the exact archive size.
 
 ---
 
 ## Suggested enhancements (implemented / recommended)
 
 **Implemented**
-- Post-transfer SHA-256 verification of each archive.
 - Embedded + sidecar hash manifest (`.txt` and `.csv`).
 - AES-256 archive encryption option.
 - robocopy transfer with retry + Copy-Item fallback.

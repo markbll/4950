@@ -55,18 +55,28 @@ function Invoke-A4950TransferJob {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Shared)
 
+    $jobStart   = Get-Date
     $cfg        = $Shared.Config
     $case       = $Shared.CaseNumber
     $caseSafe   = New-A4950CaseFolderName -CaseNumber $case
     $items      = @($Shared.Items)
     $sevenZip   = Resolve-SevenZip -PreferredPath $cfg.SevenZipPath
     $staging    = Join-Path (Expand-A4950Path $cfg.StagingFolder) $caseSafe
-    $destFolder = Join-Path $cfg.NetworkShare $caseSafe
+    # Destination is FLAT - no per-case sub-folder. Every job's files land
+    # directly in NetworkShare, so the archive/manifest/log NAMES themselves
+    # (uniqueBase below) are what keeps different jobs from colliding there,
+    # not folder isolation.
+    $destFolder = $cfg.NetworkShare
 
     # Cancel probe reused by 7-Zip and robocopy so both can be killed instantly.
     $cancel = ({ [bool]$Shared.Cancel }).GetNewClosure()
-    # Job-wide stamp used to de-dupe destination names that already exist.
+    # Job-wide stamp: also de-dupes a destination name that already exists.
     $Shared.Stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    # CMS case and/or OP name, plus pass number if given (Get-TransferName
+    # already built $case from whichever of those were supplied), plus this
+    # job's timestamp - used for every file name that reaches the flat
+    # destination, so two jobs never produce the same file name there.
+    $uniqueBase = "${caseSafe}_$($Shared.Stamp)"
 
     try {
         Write-A4950WorkerLog $Shared "=== Job started for $case ===" 'STEP'
@@ -106,10 +116,10 @@ function Invoke-A4950TransferJob {
                   try {
                     $name = Split-Path -Leaf $archive
                     $size = 0; try { $size = (Get-Item -LiteralPath $archive).Length } catch {}
-                    # Only hash the archive when integrity is actually wanted (verify or manifest).
-                    # In Quick Transfer both are off, so NO hashing is performed here.
+                    # Only hash the archive when a manifest is wanted. In Quick Transfer
+                    # this is off, so NO hashing is performed here.
                     $srcSha = ''
-                    if ($cfg.VerifyAfterTransfer -or $cfg.EmbedManifest) {
+                    if ($cfg.EmbedManifest) {
                         try { $srcSha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash } catch {}
                     }
                     Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='xfer'; Action='start'; Name=$name }
@@ -126,21 +136,14 @@ function Invoke-A4950TransferJob {
                         $whenUtc = [DateTime]::UtcNow.ToString('o')
                         $shaText = if ($srcSha) { "SHA256=$srcSha" } else { 'SHA256=(not calculated - quick transfer)' }
                         Write-A4950WorkerLog $Shared "Transferred: $destName  $shaText  ($whenUtc)" 'OK'
-                        # "Confirmed transferred" = copy succeeded AND, if verification was
-                        # requested, the destination hash actually matches. Only then is it
-                        # safe to delete the local temp copy - never on a verify failure.
+                        # The destination is a one-way write-only link (a diode) - it
+                        # cannot be read back from, so "confirmed" just means the copy
+                        # itself reported success.
                         $confirmed = $true
-                        if ($cfg.VerifyAfterTransfer) {
-                            $d = ''; try { $d = (Get-FileHash -LiteralPath $t.Destination -Algorithm SHA256).Hash } catch {}
-                            if ($d -eq $srcSha -and $srcSha) { Write-A4950WorkerLog $Shared "Verified   : $destName (SHA-256 match)" 'OK' }
-                            else { Write-A4950WorkerLog $Shared "VERIFY FAIL: $destName (SHA-256 mismatch)" 'ERROR'; $confirmed = $false }
-                        }
-                        if ($cfg.DeleteLocalArchive -and $confirmed) {
-                            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-                            Write-A4950WorkerLog $Shared "Temp cleaned: $(Split-Path -Leaf $archive) removed from staging" 'INFO'
-                        } elseif ($cfg.DeleteLocalArchive -and -not $confirmed) {
-                            Write-A4950WorkerLog $Shared "Temp KEPT (verify failed): $(Split-Path -Leaf $archive)" 'WARN'
-                        }
+                        # Local copies are always kept in staging now, regardless of
+                        # outcome - they're only removed via the operator-confirmed
+                        # "Delete Local Copies" button once the destination is verified
+                        # by eye (or manually, from the staging folder).
                         $ResultBag.Add([pscustomobject]@{ Name=$destName; Sha256=$srcSha; SizeBytes=$size; TransferredUtc=$whenUtc; Transferred=$confirmed })
                         Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='xfer'; Action='done'; Name=$name; Ok=$confirmed }
                     } else {
@@ -182,13 +185,20 @@ function Invoke-A4950TransferJob {
             if (Test-Path -LiteralPath $it) { $existingItems += $it }
             else { Write-A4950WorkerLog $Shared "SKIP (missing): $it" 'WARN' }
         }
+
+        # Counted independently of hashing/manifest generation, so these are
+        # available even when EmbedManifest is off (e.g. Quick Transfer).
+        $stats = if ($existingItems.Count -gt 0) { Get-A4950SelectionStats -SourcePath $existingItems }
+                 else { [pscustomobject]@{ FileCount = 0; FolderCount = 0; TotalBytes = 0L } }
+        Write-A4950WorkerLog $Shared "Selection  : $($stats.FileCount) file(s), $($stats.FolderCount) folder(s), $(Format-A4950Bytes $stats.TotalBytes)" 'INFO'
+
         if (-not $Shared.Cancel -and $existingItems.Count -gt 0) {
           try {
             Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage = 'item'; Current = 1; Total = 1; Name = "$($existingItems.Count) combined item(s)" }
             Write-A4950WorkerLog $Shared "--- Combining $($existingItems.Count) selected item(s) into one archive ---" 'STEP'
 
             # 1) Hash ALL originals -> one manifest covering every selected item
-            $manifestPath = Join-Path $staging ("{0}_MANIFEST.txt" -f $caseSafe)
+            $manifestPath = Join-Path $staging ("{0}_MANIFEST.txt" -f $uniqueBase)
             $extraFiles = @()
             if ($cfg.EmbedManifest) {
                 Write-A4950WorkerLog $Shared "Hashing originals ($($cfg.HashAlgorithms -join ', '))..."
@@ -206,32 +216,64 @@ function Invoke-A4950TransferJob {
             }
 
             if (-not $Shared.Cancel) {
-                # 2) Compress ALL items together into ONE archive. Split into volumes if configured.
-                $archivePath = Join-Path $staging ("{0}.{1}" -f $caseSafe, $cfg.ArchiveFormat)
+                # 2) Compress ALL items together into ONE native 7z archive. Split into volumes if configured.
+                $archivePath = Join-Path $staging ("{0}.7z" -f $uniqueBase)
                 $splitNote = if ($volMB -gt 0) { " split @ ${volMB} MB" } else { '' }
+                $xferMode = if ($cfg.TransferMode -eq 'Instant') { 'Instant' } else { 'OnComplete' }
+                if ($volMB -gt 0) {
+                    $xferModeNote = if ($xferMode -eq 'Instant') { 'transferring volumes as each finishes' } else { 'transferring once the whole archive is complete' }
+                    Write-A4950WorkerLog $Shared "Transfer mode: $xferModeNote." 'INFO'
+                }
                 Write-A4950WorkerLog $Shared "Compressing: $($existingItems.Count) item(s) -> $(Split-Path -Leaf $archivePath) (level $($cfg.CompressionLevel)$splitNote)" 'STEP'
                 Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=-1; Name=$caseSafe }
-                # -OnPartReady enqueues each produced file for transfer the moment it is
-                # complete. For a zip split into volumes, we write/close .001, .002, ...
-                # strictly in that order ourselves, so .001 is safe to start transferring
-                # immediately - well before the later volumes are even created (this is
-                # the "start transfer as soon as the first part is done" optimisation).
-                # For 7z's own -v volumes, completion order inside the running process
-                # isn't observable from outside it (7-Zip can finish volumes out of
-                # numeric order internally), so all of those are only reported here as
-                # one batch, right after 7z.exe has fully exited - never transferred early.
+                # -OnPartReady enqueues each produced file for transfer. EXCEPT .001: it's
+                # always held back and enqueued last, once every other part is already
+                # queued (or, for an unsplit archive, there's nothing to hold it back
+                # from). This is deliberate: nothing at the destination can be
+                # reassembled/opened until .001 itself lands, so holding it back is a "not
+                # usable until everything else has arrived" signal - it also happens to
+                # match how 7-Zip itself behaves: confirmed empirically, 7-Zip defers
+                # finalising volume .001 until the very end of the run regardless of
+                # transfer mode, since the archive's start header can only be written once
+                # the whole body is known.
+                #   - TransferMode 'Instant' (New-A4950Archive -TransferMode Instant):
+                #     every OTHER volume is reported here the moment 7-Zip finishes
+                #     writing it - not once the whole archive is done - so transfer starts
+                #     well before compression finishes.
+                #   - TransferMode 'OnComplete' (the default): 7-Zip is a black box while
+                #     running and does not necessarily finalise volumes in ascending
+                #     numeric order internally, so nothing is reported until the whole
+                #     process has exited and every volume is confirmed complete - all
+                #     volumes then arrive here together, in one batch.
+                # [ref] rather than a plain variable: .GetNewClosure() snapshots plain
+                # variables by VALUE (a mutation inside the closure would neither persist
+                # across the multiple calls below nor be visible out here afterwards) - a
+                # [ref] is itself a reference type, so mutating .Value is visible both
+                # across repeated invocations and back in this outer scope.
+                $heldFirstPart = [ref]$null
                 $a = New-A4950Archive -SevenZipPath $sevenZip -SourcePath $existingItems -ArchivePath $archivePath `
-                        -Level $cfg.CompressionLevel -Format $cfg.ArchiveFormat -VolumeSizeMB $volMB -Password $cfg.Password `
+                        -Level $cfg.CompressionLevel -VolumeSizeMB $volMB -Password $cfg.Password `
                         -ExcludePatterns $cfg.ExcludePatterns -ExtraFiles $extraFiles -CancelCheck $cancel `
+                        -LowResource:([bool]$cfg.SlowMachineMode) -TransferMode $xferMode `
                         -OnPartReady ({
                             param($p)
-                            $transferQueue.Enqueue($p)
-                            Write-A4950WorkerLog $Shared "Queued for transfer: $(Split-Path -Leaf $p)" 'INFO'
+                            $leaf = Split-Path -Leaf $p
+                            if ($leaf -match '\.001$' -and -not $heldFirstPart.Value) {
+                                $heldFirstPart.Value = $p
+                                Write-A4950WorkerLog $Shared "Holding back for last: $leaf (transfers once every other part is queued)" 'INFO'
+                            } else {
+                                $transferQueue.Enqueue($p)
+                                Write-A4950WorkerLog $Shared "Queued for transfer: $leaf" 'INFO'
+                            }
                         }.GetNewClosure())
 
                 if ($a.Cancelled) {
                     Write-A4950WorkerLog $Shared "Compression cancelled: $caseSafe" 'WARN'
                 } else {
+                    if ($heldFirstPart.Value -and (Test-Path -LiteralPath $heldFirstPart.Value)) {
+                        $transferQueue.Enqueue($heldFirstPart.Value)
+                        Write-A4950WorkerLog $Shared "Queued for transfer (last): $(Split-Path -Leaf $heldFirstPart.Value)" 'INFO'
+                    }
                     Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='compress'; Percent=100; Name=$caseSafe }
                     if ($a.Success) {
                         $desc = if ($a.Files.Count -gt 1) { "$($a.Files.Count) volume(s)" } else { Split-Path -Leaf $a.Files[0] }
@@ -258,26 +300,57 @@ function Invoke-A4950TransferJob {
         $ok      = $done.Count
         $fail    = @($records | Where-Object { -not $_.Transferred }).Count
         $cancelled = [bool]$Shared.Cancel
+        $jobFinish = Get-Date
+        # Sum of every archive part actually produced (successful or not) -
+        # the real "zipped size" written to disk, independent of whether every
+        # part went on to transfer successfully.
+        $compressedBytes = 0L
+        if ($records.Count -gt 0) {
+            $sum = ($records | Measure-Object -Property SizeBytes -Sum).Sum
+            if ($sum) { $compressedBytes = [int64]$sum }
+        }
 
         # ---------------------------------------------------------------------
         # Transfer log. On cancel/failure it is marked "FAILED TRANSFER".
         # ---------------------------------------------------------------------
+        $logFileName = $null
         if ($ok -gt 0) {
             $isFailed = $cancelled -or ($fail -gt 0)
-            $logName  = if ($isFailed) { "${caseSafe}_FAILED_TRANSFER.log" } else { "${caseSafe}_TRANSFER.log" }
+            $logName  = if ($isFailed) { "${uniqueBase}_FAILED_TRANSFER.log" } else { "${uniqueBase}_TRANSFER.log" }
             $logPath  = Join-Path $staging $logName
             try {
-                Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed | Out-Null
+                Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed `
+                    -Source ($existingItems -join '; ') -Destination $destFolder `
+                    -StartTime $jobStart -FinishTime $jobFinish `
+                    -FileCount $stats.FileCount -FolderCount $stats.FolderCount `
+                    -TotalBytes $stats.TotalBytes -CompressedBytes $compressedBytes | Out-Null
                 # Copy the log to the destination (no cancel check - always send it).
                 $lt = Copy-A4950ToShare -SourceFile $logPath -DestinationFolder $destFolder -TimeStamp $Shared.Stamp
-                if ($lt.Success) { Write-A4950WorkerLog $Shared "Transfer log written and sent: $logName" ($(if ($isFailed) {'WARN'} else {'OK'})) }
+                if ($lt.Success) {
+                    $logFileName = Split-Path -Leaf $lt.Destination
+                    Write-A4950WorkerLog $Shared "Transfer log written and sent: $logFileName" ($(if ($isFailed) {'WARN'} else {'OK'}))
+                }
             } catch { Write-A4950WorkerLog $Shared "Could not write/send transfer log: $($_.Exception.Message)" 'ERROR' }
         }
 
         # ---------------------------------------------------------------------
-        # Cleanup staging: always on cancel; on a fully-successful job only if
-        # the operator has cleanup enabled (every file confirmed transferred).
-        # A job with any failures/unverified files is left in place for review.
+        # Summary: start/finish time, duration, files/folders, original vs
+        # compressed size - logged for every job regardless of outcome.
+        # ---------------------------------------------------------------------
+        $durSpan = $jobFinish - $jobStart
+        $durText = if ($durSpan.TotalHours -ge 1) { $durSpan.ToString('h\h\ mm\m\ ss\s') } else { $durSpan.ToString('mm\m\ ss\s') }
+        Write-A4950WorkerLog $Shared "Started    : $($jobStart.ToString('yyyy-MM-dd HH:mm:ss'))" 'INFO'
+        Write-A4950WorkerLog $Shared "Finished   : $($jobFinish.ToString('yyyy-MM-dd HH:mm:ss'))  (took $durText)" 'INFO'
+        Write-A4950WorkerLog $Shared "Files      : $($stats.FileCount) file(s), $($stats.FolderCount) folder(s)" 'INFO'
+        Write-A4950WorkerLog $Shared "Size       : $(Format-A4950Bytes $stats.TotalBytes) original -> $(Format-A4950Bytes $compressedBytes) compressed" 'INFO'
+
+        # ---------------------------------------------------------------------
+        # Cleanup staging: always on cancel (an aborted job's partial output
+        # has no evidentiary value). On a completed job, local copies are
+        # ALWAYS kept in $staging - they are only removed by the operator,
+        # either manually or via the confirm-and-delete "Delete Local
+        # Copies" button on the transfer-finished window, after they've
+        # confirmed the files actually reached the destination.
         # ---------------------------------------------------------------------
         if ($cancelled) {
             try {
@@ -286,21 +359,33 @@ function Invoke-A4950TransferJob {
             } catch {}
             Write-A4950WorkerLog $Shared "=== CANCELLED: $ok file(s) already transferred, temp cleaned ===" 'WARN'
         } else {
-            if ($cfg.DeleteLocalArchive -and $ok -gt 0 -and $fail -eq 0) {
-                try {
-                    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-A4950WorkerLog $Shared "All files confirmed transferred - temp area cleaned: $staging" 'OK'
-                } catch { Write-A4950WorkerLog $Shared "Could not fully clean temp area: $($_.Exception.Message)" 'WARN' }
-            } elseif ($fail -gt 0) {
+            if ($fail -gt 0) {
                 Write-A4950WorkerLog $Shared "Temp files kept in $staging ($fail item(s) not confirmed - review before deleting)." 'WARN'
+            } else {
+                Write-A4950WorkerLog $Shared "Local copies kept in $staging - delete manually or via 'Delete Local Copies' once confirmed at the destination." 'INFO'
             }
             Write-A4950WorkerLog $Shared "=== Job complete: $ok transferred, $fail failed ===" ($(if ($fail) {'WARN'} else {'OK'}))
         }
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder }
+        # Staging is included so the GUI's "Delete Local Copies" button knows
+        # what to remove; omitted when cancelled since it's already gone above.
+        $stagingForGui = if ($cancelled) { $null } else { $staging }
+        # Every file actually written to the destination: the archive
+        # volume(s)/single archive plus the transfer log copied alongside it.
+        $filesForGui = @($done | ForEach-Object { $_.Name })
+        if ($logFileName) { $filesForGui += $logFileName }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{
+            Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui; Files = $filesForGui
+            Source = ($existingItems -join '; '); Started = $jobStart; Finished = $jobFinish
+            FileCount = $stats.FileCount; FolderCount = $stats.FolderCount
+            TotalBytes = $stats.TotalBytes; CompressedBytes = $compressedBytes
+        }
     }
     catch {
         Write-A4950WorkerLog $Shared "FATAL: $($_.Exception.Message)" 'ERROR'
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = 0; Fail = 1; Error = $_.Exception.Message }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{
+            Ok = 0; Fail = 1; Error = $_.Exception.Message
+            Started = $jobStart; Finished = (Get-Date)
+        }
     }
     finally {
         $Shared.Running = $false
