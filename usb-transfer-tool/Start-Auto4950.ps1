@@ -469,19 +469,6 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-# WPF freezes a Freezable (e.g. SolidColorBrush) resource loaded from a
-# ResourceDictionary when it has no dynamic content, making it read-only.
-# Set-A4950Theme mutates these brushes' .Color in place, so replace each
-# with an unfrozen clone right away - before Add_Loaded/Set-A4950Theme or
-# anything else can touch them - otherwise the first theme/mutation attempt
-# throws "Cannot modify a frozen SolidColorBrush" with no dialog shown.
-foreach ($themeKey in @('WindowBg','Panel','Accent','Text','Muted','InputBg','InputBorder','LogBg','ButtonBg')) {
-    $themeBrush = $window.Resources[$themeKey]
-    if ($themeBrush -is [System.Windows.Media.SolidColorBrush] -and $themeBrush.IsFrozen) {
-        $window.Resources[$themeKey] = $themeBrush.Clone()
-    }
-}
-
 # Grab named controls.
 $ctrl = @{}
 $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
@@ -547,16 +534,27 @@ $script:ThemeColors = $script:ThemeDark
 $script:DarkMode = $true
 
 function Set-A4950Theme {
+    <#
+    .SYNOPSIS Swap the Dark/Light theme by replacing each brush resource.
+    .DESCRIPTION
+        Replaces (never mutates) each dictionary entry with a brand new
+        SolidColorBrush. WPF freezes a Freezable resource the moment it's
+        consumed by a DynamicResource binding in the visual tree (this
+        happens during the very first render pass, before Loaded even
+        fires) - so mutating a shared brush's .Color in place throws
+        "object is in a read-only state" the first time this runs.
+        Replacing the dictionary entry sidesteps that entirely: every
+        DynamicResource-bound element re-resolves to the new brush
+        automatically, same as Set-A4950FontScale already does for the
+        (value-type, so never freezable) font-size resources below.
+    #>
     param([bool]$Dark = $true)
     $script:DarkMode = $Dark
     $palette = if ($Dark) { $script:ThemeDark } else { $script:ThemeLight }
     $script:ThemeColors = $palette
     $converter = New-Object System.Windows.Media.BrushConverter
     foreach ($key in $palette.Keys) {
-        $brush = $window.Resources[$key]
-        if ($brush -is [System.Windows.Media.SolidColorBrush]) {
-            $brush.Color = ($converter.ConvertFromString($palette[$key])).Color
-        }
+        $window.Resources[$key] = New-Object System.Windows.Media.SolidColorBrush(($converter.ConvertFromString($palette[$key])).Color)
     }
 }
 
