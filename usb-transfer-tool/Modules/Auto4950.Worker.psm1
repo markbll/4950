@@ -116,10 +116,10 @@ function Invoke-A4950TransferJob {
                   try {
                     $name = Split-Path -Leaf $archive
                     $size = 0; try { $size = (Get-Item -LiteralPath $archive).Length } catch {}
-                    # Only hash the archive when integrity is actually wanted (verify or manifest).
-                    # In Quick Transfer both are off, so NO hashing is performed here.
+                    # Only hash the archive when a manifest is wanted. In Quick Transfer
+                    # this is off, so NO hashing is performed here.
                     $srcSha = ''
-                    if ($cfg.VerifyAfterTransfer -or $cfg.EmbedManifest) {
+                    if ($cfg.EmbedManifest) {
                         try { $srcSha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash } catch {}
                     }
                     Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage='xfer'; Action='start'; Name=$name }
@@ -136,14 +136,10 @@ function Invoke-A4950TransferJob {
                         $whenUtc = [DateTime]::UtcNow.ToString('o')
                         $shaText = if ($srcSha) { "SHA256=$srcSha" } else { 'SHA256=(not calculated - quick transfer)' }
                         Write-A4950WorkerLog $Shared "Transferred: $destName  $shaText  ($whenUtc)" 'OK'
-                        # "Confirmed transferred" = copy succeeded AND, if verification was
-                        # requested, the destination hash actually matches.
+                        # The destination is a one-way write-only link (a diode) - it
+                        # cannot be read back from, so "confirmed" just means the copy
+                        # itself reported success.
                         $confirmed = $true
-                        if ($cfg.VerifyAfterTransfer) {
-                            $d = ''; try { $d = (Get-FileHash -LiteralPath $t.Destination -Algorithm SHA256).Hash } catch {}
-                            if ($d -eq $srcSha -and $srcSha) { Write-A4950WorkerLog $Shared "Verified   : $destName (SHA-256 match)" 'OK' }
-                            else { Write-A4950WorkerLog $Shared "VERIFY FAIL: $destName (SHA-256 mismatch)" 'ERROR'; $confirmed = $false }
-                        }
                         # Local copies are always kept in staging now, regardless of
                         # outcome - they're only removed via the operator-confirmed
                         # "Delete Local Copies" button once the destination is verified
@@ -220,21 +216,9 @@ function Invoke-A4950TransferJob {
             }
 
             if (-not $Shared.Cancel) {
-                # 2) Compress ALL items together into ONE archive. Split into volumes if configured.
-                # TrimStart('.') on the format guards against a stray leading dot in
-                # config (e.g. ".zip" instead of "zip") producing a double dot here.
-                $archivePath = Join-Path $staging ("{0}.{1}" -f $uniqueBase, $cfg.ArchiveFormat.TrimStart('.'))
+                # 2) Compress ALL items together into ONE native 7z archive. Split into volumes if configured.
+                $archivePath = Join-Path $staging ("{0}.7z" -f $uniqueBase)
                 $splitNote = if ($volMB -gt 0) { " split @ ${volMB} MB" } else { '' }
-                if ($volMB -gt 0 -and $cfg.ArchiveFormat -ne '7z') {
-                    # 7-Zip's -v switch does not split zip archives (it silently writes one
-                    # whole file and ignores -v) - and a home-rolled raw byte split would not
-                    # be verifiable by a receiver: 7-Zip only reports a genuine, checked
-                    # volume count for its own native container, not for arbitrary
-                    # sequentially-numbered files. So any split always forces 7z, regardless
-                    # of the configured archive format - see New-A4950Archive.
-                    Write-A4950WorkerLog $Shared "Split requested: forcing 7z format (a split zip is not reliably verifiable by a receiving tool; 7-Zip's own volumes are)." 'WARN'
-                    $archivePath = [System.IO.Path]::ChangeExtension($archivePath, '7z')
-                }
                 $xferMode = if ($cfg.TransferMode -eq 'Instant') { 'Instant' } else { 'OnComplete' }
                 if ($volMB -gt 0) {
                     $xferModeNote = if ($xferMode -eq 'Instant') { 'transferring volumes as each finishes' } else { 'transferring once the whole archive is complete' }
@@ -268,7 +252,7 @@ function Invoke-A4950TransferJob {
                 # across repeated invocations and back in this outer scope.
                 $heldFirstPart = [ref]$null
                 $a = New-A4950Archive -SevenZipPath $sevenZip -SourcePath $existingItems -ArchivePath $archivePath `
-                        -Level $cfg.CompressionLevel -Format $cfg.ArchiveFormat -VolumeSizeMB $volMB -Password $cfg.Password `
+                        -Level $cfg.CompressionLevel -VolumeSizeMB $volMB -Password $cfg.Password `
                         -ExcludePatterns $cfg.ExcludePatterns -ExtraFiles $extraFiles -CancelCheck $cancel `
                         -LowResource:([bool]$cfg.SlowMachineMode) -TransferMode $xferMode `
                         -OnPartReady ({

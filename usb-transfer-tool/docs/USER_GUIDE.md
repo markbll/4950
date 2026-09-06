@@ -108,11 +108,10 @@ UI.
 
 ### Options panel (all settings, on the main screen)
 Everything is editable on the right-hand **Options** panel — destination,
-7-Zip path, staging folder, case prefix, **archive format**, **volume/split
-size (sizing)**, the **ARCHIVE VOLUME TRANSFER** heading (transfer mode),
-compression level, password, hashing, manifest embedding, verification,
-prompt-on-insert, select-all default and exclude patterns, plus two further
-sections lower down the panel:
+7-Zip path, staging folder, case prefix, **volume/split size (sizing)**, the
+**ARCHIVE VOLUME TRANSFER** heading (transfer mode), compression level,
+password, hashing, manifest embedding, prompt-on-insert, select-all default
+and exclude patterns, plus two further sections lower down the panel:
 - **SOUNDS** — pick a `.wav` file to play on start, finish and error, or
   leave any of them blank for the standard Windows sound instead.
 - **APPEARANCE** — text size (Small/Medium/Large/Extra Large) and Dark Mode.
@@ -123,17 +122,17 @@ everything to `config.json` and then hides the Options panel. Every checkbox
 can be ticked *and* un-ticked.
 
 **Combined archive** — every folder/file you select is always packed into a
-**single** archive (this is fixed behavior, not a setting): one shared
-manifest lists every file, prefixed with its original top-level folder name so
-nothing collides. With the default transfer mode ("Wait for All Files"),
-nothing transfers until that one compression pass finishes; with **Transfer
-Immediately** (see below), a split archive's volumes can start transferring
-well before compression is done.
+**single** native 7z archive (this is fixed behavior, not a setting): one
+shared manifest lists every file, prefixed with its original top-level folder
+name so nothing collides. With the default transfer mode (**Transfer
+Immediately**), a split archive's volumes start transferring well before
+compression is done; with **Wait for All Files** (see below), nothing
+transfers until that one compression pass finishes.
 
 **Destination naming** — files land **directly in the destination**, with no
 per-case sub-folder (this is fixed behavior, not a setting). Uniqueness comes
 entirely from the file name: CMS case and/or OP name, pass number if given,
-and this job's own timestamp, e.g. `CMS-A12345_JBLOGGS_20260818_143000.zip`.
+and this job's own timestamp, e.g. `CMS-A12345_JBLOGGS_20260818_143000.7z`.
 The embedded manifest and the transfer log sent to the destination share the
 same name. This keeps repeated jobs - even with the same case/OP/pass - from
 ever colliding at the destination, without needing a folder per case.
@@ -144,10 +143,10 @@ low-spec machine. While it's on:
 - The **System Monitor** (CPU/Memory/Network/Temp) stops polling entirely and
   is hidden, rather than just polling less often.
 - Compression is forced to **store** (no compression math) and
-  **single-threaded**, regardless of the Level/format set in Options - this
+  **single-threaded**, regardless of the Level set in Options - this
   trades speed and archive size for the smallest possible CPU/RAM load.
-- Hashing, the manifest and verification are **not** affected — integrity is
-  never traded away for resource usage.
+- Hashing and the manifest are **not** affected — integrity is never traded
+  away for resource usage.
 
 Click the button again to turn it back off. It's a session toggle rather
 than an Options-panel checkbox, so it takes effect immediately without
@@ -216,19 +215,19 @@ less than typical documents.
    the manifest**.
 3. The archive (or its volumes) is **queued for transfer** to the
    destination per the "Archive volume transfer" setting — see § 4.
-4. **Transfer** via robocopy (retry/resume) to `<dest>\<CASE>\<CASE>.<fmt>`.
+4. **Transfer** via robocopy (retry/resume) to `<dest>\<CASE>\<CASE>.7z`.
    A destination file name clash is never overwritten — a date/time is
-   appended instead.
-5. If **VerifyAfterTransfer** is on, the archive is **re-hashed at the
-   destination** and compared (SHA-256).
-6. Local copies are **always kept** in the staging folder after a completed
+   appended instead. The destination is treated as a one-way link (e.g. a
+   data diode) - nothing is read back from it to verify, so a successful
+   copy is the final confirmation.
+5. Local copies are **always kept** in the staging folder after a completed
    job — see "Temp cleanup" below.
 
 A per-case log is also written to
 `…\StagingFolder\<CASE>\<CASE>.log`.
 
 ### Temp cleanup
-There is no auto-delete setting: local copies (the zip/7z file(s), manifest
+There is no auto-delete setting: local copies (the 7z file(s), manifest
 and transfer log) stay in the staging folder after a completed job, whether
 every file was confirmed or not. Remove them once you've confirmed the files
 reached their destination — either manually, or with **Delete Local Copies**
@@ -274,7 +273,7 @@ concurrently.
 
 ### Notification sounds
 A sound plays on **start**, on a clean **finish**, and the moment any
-**error** is logged (compress/transfer/verify failures, etc.). Pick your own
+**error** is logged (compress/transfer failures, etc.). Pick your own
 `.wav` file for each event in Options → **SOUNDS**; leave any of them blank
 to fall back to a standard Windows sound instead — **Beep** on start,
 **Asterisk** on finish, **Hand** (Critical Stop) on error — which follows
@@ -303,7 +302,7 @@ number if given, and the job's own timestamp):
 
 ```
 C:\Destination\
-    CMS-A12345_20260818_143000.zip            ← un-split (VolumeSizeMB = 0): one combined archive, manifest embedded inside
+    CMS-A12345_20260818_143000.7z             ← un-split (VolumeSizeMB = 0): one combined archive, manifest embedded inside
 ```
 
 or, with a split size set:
@@ -325,17 +324,16 @@ CMS-A12345_20260818_143000_MANIFEST.csv      (machine-readable hashes, all items
 Manifest header records: case number, source path, UTC timestamp, machine,
 operator, file count and algorithms — a lightweight chain-of-custody record.
 
-**A split archive is always native 7z, regardless of the configured archive
-format.** `ArchiveFormat: zip` only takes effect for an **un-split** archive
-(`VolumeSizeMB = 0`). This is a correctness fix, not a preference: 7-Zip's own
-volume switch (`-v`) only splits its native `.7z` container — it silently
-ignores `-v` for `.zip` (writes one whole file and exits 0 as if nothing were
-wrong). An earlier version of this tool worked around that by raw-byte-
-splitting a finished `.zip` into `.001`/`.002`/… parts. That turned out to be
-a real integrity risk: 7-Zip only ever reports a genuine, checked volume
-count for its *own* native format — tested against a raw-byte-split zip with
-a part deliberately withheld, `7z l` still reported the wrong, present-file-
-count "Volumes = N" as if that were the true total, rather than failing. A
+**Every archive is native 7z** - split or not. This is a correctness fix for
+splitting specifically, not just a preference: 7-Zip's own volume switch
+(`-v`) only splits its native `.7z` container — it silently ignores `-v` for
+`.zip` (writes one whole file and exits 0 as if nothing were wrong). An
+earlier version of this tool worked around that by raw-byte-splitting a
+finished `.zip` into `.001`/`.002`/… parts. That turned out to be a real
+integrity risk: 7-Zip only ever reports a genuine, checked volume count for
+its *own* native format — tested against a raw-byte-split zip with a part
+deliberately withheld, `7z l` still reported the wrong, present-file-count
+"Volumes = N" as if that were the true total, rather than failing. A
 receiving/watch-folder tool that trusts that number (instead of requiring a
 full `7z t` pass with 7-Zip's own "Everything is Ok") could act on a
 truncated result without any error ever being raised. Native 7z volumes
@@ -348,22 +346,14 @@ count printed first.
 Reassemble by opening the `.001` file in 7-Zip (all parts must be in the same
 folder), or `7z x CMS-A12345_20260818_143000.7z.001` from the command line.
 Plain `copy /b`/`cat` concatenation does **not** work for native 7z volumes —
-you need 7-Zip (or a compatible tool) at the receiving end to open a split
-delivery. If that's a hard requirement for some recipients, keep archives
-**un-split** (`VolumeSizeMB = 0`); 7-Zip's normal `zip` creation there is
-unaffected and opens with any zip utility.
+you need 7-Zip (or a compatible tool) at the receiving end to open any
+delivery from this tool, split or not.
 
 **When each volume actually transfers is controlled by the "ARCHIVE VOLUME
 TRANSFER" setting in Options** (only relevant when split):
 
-- **Wait for All Files** (default, safest) — 7-Zip is a
-  separate process, and it does **not** necessarily finish writing its
-  volumes in ascending numeric order internally (the first volume file can,
-  in some cases, be the *last* one it actually finishes) — so no volume is
-  picked up for transfer early; all of them are only reported once the whole
-  7-Zip process has exited and every volume is confirmed complete.
-- **Transfer Immediately** — each volume is picked up for transfer the
-  moment 7-Zip finishes writing it, rather than waiting for the rest.
+- **Transfer Immediately** (default) — each volume is picked up for transfer
+  the moment 7-Zip finishes writing it, rather than waiting for the rest.
   Verified against real 7-Zip 23.01: 7-Zip writes each volume to a temporary
   file and only renames it to its final name once that volume's content is
   completely flushed and will never be touched again — that rename is the
@@ -371,6 +361,12 @@ TRANSFER" setting in Options** (only relevant when split):
   exclusive-open probe as a second, best-effort check that nothing still has
   the file open before it's treated as safe to move. **Quick Transfer always
   turns this on.**
+- **Wait for All Files** — 7-Zip is a
+  separate process, and it does **not** necessarily finish writing its
+  volumes in ascending numeric order internally (the first volume file can,
+  in some cases, be the *last* one it actually finishes) — so no volume is
+  picked up for transfer early; all of them are only reported once the whole
+  7-Zip process has exited and every volume is confirmed complete.
 
 **Either way, `.001` is always the last volume to actually arrive.** It's
 deliberately held back and queued last regardless of transfer mode — and
@@ -394,16 +390,14 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | 7-Zip path | Blank = auto-detect |
 | Staging folder | Local temp area for archives; default `C:\temp` |
 | Case prefix | Required prefix for case numbers (`CMS-A`) |
-| Archive format | `zip` (default, portable) or `7z` (smaller) |
 | Split into volumes (MB) | Max size per file; default **2048** (2 GB); `0` = single file |
-| Archive volume transfer | "Wait for All Files" (default) or "Transfer Immediately"; only relevant when split - see § 4 |
+| Archive volume transfer | "Transfer Immediately" (default) or "Wait for All Files"; only relevant when split - see § 4 |
 | Compression level | 0 (store) … 9 (ultra) |
-| Archive password | Optional AES-256 (encrypts headers too on `7z`) |
+| Archive password | Optional AES-256 (encrypts headers too - always native 7z) |
 | Hash SHA-256 / MD5 | Which hashes to compute |
 | Embed manifest | Include the manifest inside each archive |
 | Prompt on insert | Show the Yes/No dialog automatically on USB insert |
 | Select all by default | On USB insert, add the whole drive to the selection automatically |
-| Verify after transfer | Re-hash the archive at the destination |
 | Exclude patterns | Names to skip when compressing (e.g. `System Volume Information`) |
 | Start / Finish / Error sound | Optional `.wav` per event; blank = standard Windows sound |
 | Text size | Small / Medium (default) / Large / Extra Large |
@@ -424,7 +418,6 @@ see "Temp cleanup" above for how to remove them.
 | Nothing selected | Add at least one item with **Browse Folders...** or **Add Files...**, or turn on "Select all folders/files by default" in Options. |
 | Case number rejected | It must start with `CMS-A` (or your prefix) and have an identifier. |
 | Slow compression | Lower the compression level; level 1–3 is much faster. |
-| Verify fails | Re-run; check network stability and destination free space. |
 | Script won't run | Launch with `powershell -ExecutionPolicy Bypass -File …`. |
 
 ---

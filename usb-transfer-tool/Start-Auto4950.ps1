@@ -24,7 +24,7 @@ param()
 # Bootstrapping
 # ----------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '4.5'
+$script:AppVersion = '5.0'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -335,9 +335,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
 
               <Separator Margin="0,6"/>
               <TextBlock Text="SIZING / COMPRESSION" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
-              <TextBlock Text="Archive format"/>
-              <ComboBox x:Name="OptFormat"><ComboBoxItem>zip</ComboBoxItem><ComboBoxItem>7z</ComboBoxItem></ComboBox>
-              <TextBlock Text="All selected folders/files are always combined into ONE archive."
+              <TextBlock Text="All selected folders/files are always combined into ONE 7z archive."
                          Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,0,0,8"/>
               <TextBlock Text="Split size (per volume)"/>
               <ComboBox x:Name="OptVolume" IsEditable="True">
@@ -357,8 +355,8 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
 
               <Separator Margin="0,6"/>
               <TextBlock Text="ARCHIVE VOLUME TRANSFER" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
-              <RadioButton x:Name="OptXferOnComplete" GroupName="XferMode" Content="Wait for All Files" Margin="0,2,0,0" IsChecked="True"/>
-              <RadioButton x:Name="OptXferInstant"    GroupName="XferMode" Content="Transfer Immediately" Margin="0,2,0,0"/>
+              <RadioButton x:Name="OptXferOnComplete" GroupName="XferMode" Content="Wait for All Files" Margin="0,2,0,0"/>
+              <RadioButton x:Name="OptXferInstant"    GroupName="XferMode" Content="Transfer Immediately" Margin="0,2,0,0" IsChecked="True"/>
               <TextBlock Text="'Wait for All Files' waits for the whole archive before sending anything - safest, and used automatically when there's no split. 'Transfer Immediately' sends each volume the moment 7-Zip finishes it, rather than waiting for the whole archive; the volume named .001 still always goes last either way, since 7-Zip itself only finalises it at the very end." Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,2,0,6"/>
 
               <Separator Margin="0,6"/>
@@ -366,7 +364,6 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
               <CheckBox x:Name="OptSha"    Content="Hash SHA-256"/>
               <CheckBox x:Name="OptMd5"    Content="Hash MD5"/>
               <CheckBox x:Name="OptEmbed"  Content="Embed hash manifest in archive"/>
-              <CheckBox x:Name="OptVerify" Content="Verify archive at destination"/>
 
               <Separator Margin="0,6"/>
               <TextBlock Text="BEHAVIOUR" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
@@ -1019,11 +1016,9 @@ function Set-OptionsFromConfig {
     $ctrl.OptSha.IsChecked        = ($config.HashAlgorithms -contains 'SHA256')
     $ctrl.OptMd5.IsChecked        = ($config.HashAlgorithms -contains 'MD5')
     $ctrl.OptEmbed.IsChecked      = [bool]$config.EmbedManifest
-    $ctrl.OptVerify.IsChecked     = [bool]$config.VerifyAfterTransfer
     $ctrl.OptPrompt.IsChecked     = [bool]$config.AutoPromptOnInsert
     $ctrl.OptSelDefault.IsChecked = [bool]$config.DefaultSelectAll
     $ctrl.OptExcl.Text            = ($config.ExcludePatterns -join ', ')
-    foreach ($it in $ctrl.OptFormat.Items) { if ($it.Content -eq $config.ArchiveFormat) { $ctrl.OptFormat.SelectedItem = $it } }
     $ctrl.OptSoundStart.Text  = $config.SoundStartPath
     $ctrl.OptSoundFinish.Text = $config.SoundFinishPath
     $ctrl.OptSoundError.Text  = $config.SoundErrorPath
@@ -1037,7 +1032,6 @@ function Sync-OptionsToConfig {
     $config.SevenZipPath  = $ctrl.Opt7z.Text.Trim()
     $config.StagingFolder = $ctrl.OptStage.Text.Trim()
     if ($ctrl.OptPrefix.Text.Trim()) { $config.CasePrefix = $ctrl.OptPrefix.Text.Trim() }
-    if ($ctrl.OptFormat.SelectedItem) { $config.ArchiveFormat = $ctrl.OptFormat.SelectedItem.Content }
     $config.VolumeSizeMB     = Parse-SplitMB ([string]$ctrl.OptVolume.Text)
     $config.TransferMode     = if ($ctrl.OptXferInstant.IsChecked) { 'Instant' } else { 'OnComplete' }
     $config.CompressionLevel = [int]$ctrl.OptLevel.Value
@@ -1045,7 +1039,6 @@ function Sync-OptionsToConfig {
     if ($algs.Count -eq 0) { $algs = @('SHA256') }
     $config.HashAlgorithms      = $algs
     $config.EmbedManifest       = [bool]$ctrl.OptEmbed.IsChecked
-    $config.VerifyAfterTransfer = [bool]$ctrl.OptVerify.IsChecked
     $config.AutoPromptOnInsert  = [bool]$ctrl.OptPrompt.IsChecked
     $config.DefaultSelectAll    = [bool]$ctrl.OptSelDefault.IsChecked
     $config.ExcludePatterns     = @($ctrl.OptExcl.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -1159,17 +1152,14 @@ function Set-QuickTransfer {
         "  - Split into 250 MB files (so parts start transferring as soon as`n" +
         "    each one is written, instead of waiting for one large file)`n" +
         "  - NO hashing  (SHA-256 / MD5 will NOT be calculated)`n" +
-        "  - NO manifest`n" +
-        "  - NO verification at the destination`n`n" +
-        "File integrity will NOT be recorded or verified. Use this only when speed " +
+        "  - NO manifest`n`n" +
+        "File integrity will NOT be recorded. Use this only when speed " +
         "matters more than a hash record.`n`nApply Quick Transfer settings?",
         'Quick Transfer - integrity disabled', 'YesNo', 'Warning')
     if ($warn -ne 'Yes') { Add-LogLine 'Quick Transfer cancelled - settings unchanged.' 'INFO'; return }
 
     # Fastest: store (no compression), split into small (250 MB) parts so each
-    # one starts transferring as soon as it's written, no hashing, no manifest,
-    # no verify.
-    foreach ($it in $ctrl.OptFormat.Items) { if ($it.Content -eq 'zip') { $ctrl.OptFormat.SelectedItem = $it } }
+    # one starts transferring as soon as it's written, no hashing, no manifest.
     $ctrl.OptLevel.Value = 0
     $ctrl.OptLevelLbl.Text = 'Compression level: 0'
     $ctrl.OptVolume.Text = '250'
@@ -1177,10 +1167,9 @@ function Set-QuickTransfer {
     $ctrl.OptSha.IsChecked    = $false
     $ctrl.OptMd5.IsChecked    = $false
     $ctrl.OptEmbed.IsChecked  = $false   # no manifest -> originals are not hashed
-    $ctrl.OptVerify.IsChecked = $false   # no re-hash at destination
     Sync-OptionsToConfig
     Update-Footer
-    Add-LogLine 'Quick Transfer ON: store (no compression), split @ 250 MB, transfer instantly, NO hashing, NO verify - fastest throughput.' 'WARN'
+    Add-LogLine 'Quick Transfer ON: store (no compression), split @ 250 MB, transfer instantly, NO hashing - fastest throughput.' 'WARN'
 }
 
 # ----------------------------------------------------------------------------
@@ -1220,7 +1209,7 @@ function Update-NamePreview {
     $tn = Get-TransferName
     if ($tn.Ok) {
         $ctrl.LblNamePreview.Foreground = $window.FindResource('Muted')
-        $ctrl.LblNamePreview.Text = "File name: $($tn.Name)__<folder>.$($config.ArchiveFormat)"
+        $ctrl.LblNamePreview.Text = "File name: $($tn.Name)__<folder>.7z"
     } else {
         $ctrl.LblNamePreview.Foreground = $window.FindResource('Accent')
         $ctrl.LblNamePreview.Text = "File name: $($tn.Reason)"
@@ -1240,13 +1229,9 @@ function Update-Footer {
     if (-not $sz) { $sz = 'NOT FOUND' }
     $isSplit = [int]$config.VolumeSizeMB -gt 0
     $split = if ($isSplit) { "Split: $([int]$config.VolumeSizeMB) MB" } else { 'Split: off' }
-    # A split archive always forces native 7z, regardless of the configured
-    # format - show the format that will actually be used, not the setting.
-    $fmt   = if ($isSplit) { '7z (forced by split)' } else { $config.ArchiveFormat }
     $xfer  = if (-not $isSplit) { '' } elseif ($config.TransferMode -eq 'Instant') { '  Xfer:instant' } else { '  Xfer:on-complete' }
     $hash  = if ($config.EmbedManifest) { "Hash:$($config.HashAlgorithms -join '+')" } else { 'Hash:OFF' }
-    $vfy   = if ($config.VerifyAfterTransfer) { 'Verify:on' } else { 'Verify:off' }
-    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   $fmt  L$($config.CompressionLevel)  $split$xfer  $hash  $vfy"
+    $ctrl.LblDest.Text = "Dest: $($config.NetworkShare)   |   7-Zip: $sz   |   7z  L$($config.CompressionLevel)  $split$xfer  $hash"
 }
 
 # ----------------------------------------------------------------------------
@@ -1411,8 +1396,8 @@ function Hide-OptionsPanel {
 # Slow Machine Mode: for old/low-spec hardware. Stops the System Monitor
 # polling outright (rather than just slowing it) and forces single-threaded,
 # low-level 7-Zip compression, trading speed for a small, predictable
-# CPU/RAM footprint. Hashing and verification are untouched - integrity
-# never gets weakened for the sake of resource usage.
+# CPU/RAM footprint. Hashing is untouched - integrity never gets weakened
+# for the sake of resource usage.
 # ----------------------------------------------------------------------------
 function Set-SlowMachineMode {
     param([bool]$On)
@@ -1468,9 +1453,9 @@ function Get-StagingSpaceGuide {
 
     $stagingPath = Expand-A4950Path $config.StagingFolder
     $free  = Get-A4950FreeSpace -Path $stagingPath
-    $ratio = Get-A4950CompressionRatio -Level ([int]$config.CompressionLevel) -Format $config.ArchiveFormat
+    $ratio = Get-A4950CompressionRatio -Level ([int]$config.CompressionLevel)
     $estBytes = [int64]($srcBytes * $ratio * 1.02)
-    $note = "Estimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), $($config.ArchiveFormat) level $($config.CompressionLevel))"
+    $note = "Estimated size to send  : $(Format-A4950Bytes $estBytes)  (source: $(Format-A4950Bytes $srcBytes), 7z level $($config.CompressionLevel))"
 
     if (-not $free.Ok) {
         Add-LogLine "Could not determine local staging free space ($stagingPath): $($free.Error). Continuing." 'WARN'
@@ -1532,25 +1517,20 @@ function Start-Capture {
         # List each selected item's FULL source path, the destination folder and the
         # single combined archive name.
         $isSplit = [int]$config.VolumeSizeMB -gt 0
-        # A split archive always ends up native 7z, regardless of the configured
-        # format - 7-Zip's -v switch doesn't split zip, and only a genuine 7z
-        # volume set gives a receiving tool a verifiable volume count.
-        $fmt = if ($isSplit) { '7z' } else { $config.ArchiveFormat }
         $xferDesc = if ($config.TransferMode -eq 'Instant') { 'transferred instantly, as each finishes' } else { 'transferred once the whole archive is complete' }
-        $splitSuffix = if ($isSplit) { ".001, .002, ... (split forces 7z format; volumes $xferDesc)" } else { '' }
+        $splitSuffix = if ($isSplit) { ".001, .002, ... (volumes $xferDesc)" } else { '' }
         $lines = foreach ($it in $items) { "   SOURCE: $it" }
         $maxShow = 15
         $shown = @($lines | Select-Object -First $maxShow)
         if ($items.Count -gt $maxShow) { $shown += "   ... and $($items.Count - $maxShow) more" }
-        $archiveNote = "COMBINED into ONE archive - ${caseSafe}_<timestamp>.$fmt$splitSuffix (unique name, no destination sub-folder)`n`nSelected items (full source path):`n$($shown -join "`n")"
+        $archiveNote = "COMBINED into ONE archive - ${caseSafe}_<timestamp>.7z$splitSuffix (unique name, no destination sub-folder)`n`nSelected items (full source path):`n$($shown -join "`n")"
         $destPath = $config.NetworkShare
         $driveRoot = Get-SelectedDriveRoot
         $srcRootFull = if ($driveRoot) { "$driveRoot\" } else { '(manually added items - see full paths below)' }
         $integrity = if ($config.EmbedManifest) {
-            "Originals will be hashed ($($config.HashAlgorithms -join ' + '))" +
-            $(if ($config.VerifyAfterTransfer) { ' and verified at the destination' } else { ' (no destination verify)' }) + '.'
+            "Originals will be hashed ($($config.HashAlgorithms -join ' + '))."
         } else {
-            "WARNING: Quick Transfer - NO hashing and NO verification. File integrity will not be recorded."
+            "WARNING: Quick Transfer - NO hashing. File integrity will not be recorded."
         }
         $msg = @"
 Capture $($items.Count) selected item(s) as '$name' ($($tn.Kind))?
@@ -1816,17 +1796,17 @@ SLOW MACHINE MODE
   Click "Slow Machine: OFF" in the header to turn it ON for an old or
   low-spec machine. It stops the System Monitor's polling outright (rather
   than just slowing it down) and forces single-threaded, store-only (no
-  compression math) 7-Zip, regardless of the Level/format set in Options -
-  trading speed and archive size for the smallest possible CPU/RAM load.
-  Hashing, the manifest and verification are unaffected.
+  compression math) 7-Zip, regardless of the Level set in Options - trading
+  speed and archive size for the smallest possible CPU/RAM load. Hashing and
+  the manifest are unaffected.
 
 QUICK TRANSFER
   The "Quick Transfer" button applies the fastest possible settings: store (no
   compression), split into 250 MB parts (each one starts transferring as soon
   as it's written, rather than waiting for one large file), NO hashing
-  (SHA-256/MD5 are not calculated), no manifest and no verification. It warns
-  you first, because file integrity is neither recorded nor verified in this
-  mode. Use it only when raw transfer speed matters more than a hash record.
+  (SHA-256/MD5 are not calculated) and no manifest. It warns you first,
+  because file integrity is not recorded in this mode. Use it only when raw
+  transfer speed matters more than a hash record.
 
 CANCEL
   "Cancel" is immediate: it kills the running 7-Zip/robocopy within a fraction
@@ -1872,7 +1852,7 @@ STAGING SPACE GUIDE
   documents.
 
 TEMP CLEANUP
-  Local copies (the zip/7z file(s), manifest and transfer log) are ALWAYS
+  Local copies (the 7z file(s), manifest and transfer log) are ALWAYS
   kept in the staging folder after a completed job - nothing is deleted
   automatically. Once you've confirmed the files reached their destination,
   remove them either manually or with "Delete Local Copies" on the transfer
@@ -1888,12 +1868,12 @@ COMBINED ARCHIVE
 
 TRANSFER ORDER
   Set in Options under "ARCHIVE VOLUME TRANSFER" (only matters when split):
-    - "Wait for All Files" (default, safest): 7-Zip is a black box while
-      running, so every volume is picked up for transfer together, only
-      once the whole process has exited and every volume is confirmed
-      complete.
-    - "Transfer Immediately": each volume is picked up for transfer the
-      moment 7-Zip finishes writing it - not once the whole archive is done.
+    - "Transfer Immediately" (default): each volume is picked up for
+      transfer the moment 7-Zip finishes writing it - not once the whole
+      archive is done.
+    - "Wait for All Files" (safest): 7-Zip is a black box while running, so
+      every volume is picked up for transfer together, only once the whole
+      process has exited and every volume is confirmed complete.
   EITHER way, EXCEPT .001: it's always held back and sent only once every
   other volume has already been queued - even in Instant mode, since 7-Zip
   itself only finalises .001 at the very end of the run regardless (the
@@ -1902,43 +1882,40 @@ TRANSFER ORDER
   incomplete transfer at the destination can never look like a finished one.
 
 OPTIONS (all on the main screen, right-hand panel)
-  Network share, 7-Zip path, staging folder, case prefix, archive format,
-  volume/split size, archive volume transfer mode, compression level,
-  password, hashing, manifest embedding, verification, prompt-on-insert,
-  select-all default, delete-local and exclude patterns. Every option can be
-  toggled/edited and "Save Options" persists them to config.json. Options
-  also apply immediately when you press Start.
+  Network share, 7-Zip path, staging folder, case prefix, volume/split size,
+  archive volume transfer mode, compression level, password, hashing,
+  manifest embedding, prompt-on-insert, select-all default, delete-local and
+  exclude patterns. Every option can be toggled/edited and "Save Options"
+  persists them to config.json. Options also apply immediately when you
+  press Start.
 
 WHAT HAPPENS
   - Every original file across your whole selection is hashed (SHA-256 / MD5)
     into one manifest.
-  - Everything selected is compressed with 7-Zip into ONE archive; the
-    manifest is embedded.
+  - Everything selected is compressed with 7-Zip into ONE native 7z archive;
+    the manifest is embedded.
   - Large archives are split into volumes ($([int]$config.VolumeSizeMB) MB each by default) so no
-    single file is unwieldy. Set the size to 0 for one file. A split ALWAYS
-    uses native 7z volumes, regardless of the archive format configured -
-    7-Zip's -v switch silently does not split .zip, and a home-rolled byte
-    split would not be reliably verifiable by a receiving tool the way
-    7-Zip's own volumes are (see NAMING below).
+    single file is unwieldy. Set the size to 0 for one file. Splitting uses
+    native 7z volumes - 7-Zip's -v switch silently does not split .zip, and
+    a home-rolled byte split would not be reliably verifiable by a
+    receiving tool the way 7-Zip's own volumes are (see NAMING below).
   - Volumes transfer per the "Archive volume transfer" setting above - see
     TRANSFER ORDER.
-  - Optionally the transferred archive is re-hashed at the destination to verify.
 
 NAMING
   Files land directly in the destination - NO per-case sub-folder. The
   archive name is built from the CMS case and/or OP name, plus pass number if
   given, plus this job's own timestamp, so two jobs never collide there:
-    <share>\$($config.CasePrefix)12345_20260818_143000.$($config.ArchiveFormat)   (unsplit)
+    <share>\$($config.CasePrefix)12345_20260818_143000.7z              (unsplit)
     <share>\$($config.CasePrefix)12345_20260818_143000.7z.001, .7z.002, ...       (split)
-  When split, volumes are always native 7z (regardless of archive format) -
-  open the .001 in 7-Zip to reassemble (keep all parts together), or
+  Volumes are always native 7z - open the .001 in 7-Zip to reassemble (keep all parts together), or
   "7z x <name>.7z.001" from the command line. Plain copy/cat concatenation
   does NOT work for these - a genuine 7z volume set is what lets 7-Zip
   itself refuse to report a volume count, or open at all, until every part
-  is truly present; a plain byte-split file can't offer that guarantee. If
-  recipients without 7-Zip need to open a delivery directly, keep it unsplit.
-  The manifest and transfer log sent to the destination use the same unique
-  name.
+  is truly present; a plain byte-split file can't offer that guarantee.
+  Every archive - split or not - requires 7-Zip (or a compatible tool) at
+  the receiving end to open. The manifest and transfer log sent to the
+  destination use the same unique name.
 
 SYSTEM MONITOR
   Live CPU, memory, network throughput and temp-folder free space.
@@ -2015,7 +1992,6 @@ $ctrl.BtnBrowseSoundError.Add_Click({ $p = Select-WavFile -Title 'Select error s
 $ctrl.OptDarkMode.Add_Click({ Set-A4950Theme -Dark ([bool]$ctrl.OptDarkMode.IsChecked) })
 $ctrl.OptFontSize.Add_SelectionChanged({ if ($ctrl.OptFontSize.SelectedItem) { Set-A4950FontScale -Size $ctrl.OptFontSize.SelectedItem.Tag } })
 $ctrl.OptLevel.Add_ValueChanged({ $ctrl.OptLevelLbl.Text = "Compression level: $([int]$ctrl.OptLevel.Value)" })
-$ctrl.OptFormat.Add_SelectionChanged({ if ($ctrl.OptFormat.SelectedItem) { $config.ArchiveFormat = $ctrl.OptFormat.SelectedItem.Content; Update-NamePreview } })
 $ctrl.TxtCase.Add_TextChanged({
     $t = $ctrl.TxtCase.Text.Trim()
     $blank = (-not $t) -or ($t -eq $config.CasePrefix)

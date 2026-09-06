@@ -35,9 +35,8 @@ function Get-DefaultConfig {
         CasePrefix          = 'CMS-A'                  # Enforced prefix for case numbers
         # --- Compression -------------------------------------------------------
         CompressionLevel    = 5                        # 0 (store) .. 9 (ultra)
-        ArchiveFormat       = 'zip'                     # zip | 7z - only honoured when VolumeSizeMB is 0; a split always forces 7z (see New-A4950Archive)
         VolumeSizeMB        = 2048                      # Split archives into volumes of this size (MB). 0 = no split
-        TransferMode        = 'OnComplete'              # OnComplete | Instant - see New-A4950Archive
+        TransferMode        = 'Instant'                 # OnComplete | Instant - see New-A4950Archive
         Password            = ''                       # Optional AES-256 archive password (blank = none)
         # --- Hashing -----------------------------------------------------------
         HashAlgorithms      = @('SHA256', 'MD5')       # Original-file hashing
@@ -45,7 +44,6 @@ function Get-DefaultConfig {
         # --- Behaviour ---------------------------------------------------------
         AutoPromptOnInsert  = $true                    # Show the action prompt when a USB drive appears
         DefaultSelectAll    = $true                    # Pre-select all folders/files by default
-        VerifyAfterTransfer = $true                    # Re-hash the archive at destination
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
         SlowMachineMode     = $false                   # Low CPU/RAM/GPU mode: no system monitor, single-threaded compression
         # --- Sounds --------------------------------------------------------------
@@ -341,7 +339,6 @@ function New-A4950Archive {
         [Parameter(Mandatory)][string[]]$SourcePath,   # one path, or several to combine into one archive
         [Parameter(Mandatory)][string]$ArchivePath,
         [ValidateRange(0, 9)][int]$Level = 5,
-        [ValidateSet('7z', 'zip')][string]$Format = 'zip',
         [int]$VolumeSizeMB = 0,          # >0 splits the archive into volumes of this size (MB)
         [string]$Password,
         [string[]]$ExcludePatterns,
@@ -350,30 +347,13 @@ function New-A4950Archive {
         [scriptblock]$OnPartReady,      # Called with a produced file's path as soon as it is complete
         [scriptblock]$OnOutput,
         [switch]$LowResource,           # Slow Machine Mode: single-threaded, capped compression level
-        [ValidateSet('OnComplete', 'Instant')][string]$TransferMode = 'OnComplete'
+        [ValidateSet('OnComplete', 'Instant')][string]$TransferMode = 'Instant'
     )
 
-    # 7-Zip's -v (volumes) switch only splits the native 7z container - it
-    # silently does NOT split zip archives (7z.exe just writes one whole .zip
-    # and exits 0, ignoring -v entirely). Worse, a home-rolled raw byte split
-    # of a zip is not verifiable by a receiver: 7-Zip only ever reports a
-    # genuine, end-of-archive-header-checked "Volumes = N" for its own native
-    # multi-volume format - given a partial set of raw byte-split files, `7z l`
-    # instead just counts however many sequentially-numbered files happen to
-    # be physically present and reports THAT as the total, with no validation
-    # that it's really complete. So whenever the archive needs to be split
-    # into volumes, it is always built as native 7z, regardless of the
-    # requested Format - only that gives a receiving tool a volume count (and
-    # a `7z t` pass) that can actually be trusted. An unsplit archive is
-    # unaffected and still honours Format.
-    $effectiveFormat = if ($VolumeSizeMB -gt 0) { '7z' } else { $Format }
-    if ($effectiveFormat -ne $Format) {
-        # 7-Zip keeps whatever extension it's given regardless of -t, so the
-        # output file name must be corrected too - otherwise 7z-format volumes
-        # would misleadingly still be named "*.zip.001".
-        $ArchivePath = [System.IO.Path]::ChangeExtension($ArchivePath, '7z')
-    }
-
+    # Always native 7z: 7-Zip's own volume count (and a `7z t` pass) is the
+    # only thing a receiving tool can actually trust to detect a partial
+    # transfer - a raw byte split, or .zip's silently-ignored -v switch,
+    # can't offer that guarantee.
     $archiveDir = Split-Path -Parent $ArchivePath
     if (-not (Test-Path -LiteralPath $archiveDir)) {
         New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
@@ -394,18 +374,18 @@ function New-A4950Archive {
     #
     # Slow Machine Mode trades compression ratio for the smallest possible CPU
     # footprint: store (no compression math, just I/O) and single-threaded,
-    # regardless of the Level/format the operator has set. Hashing, manifest
-    # and verification are unaffected - only the compression cost changes.
+    # regardless of the Level the operator has set. Hashing and the manifest
+    # are unaffected - only the compression cost changes.
     $effectiveLevel = if ($LowResource) { 0 } else { $Level }
     $szArgs = [System.Collections.Generic.List[string]]::new()
-    $szArgs.AddRange([string[]]@('a', "-t$effectiveFormat", "-mx=$effectiveLevel", '-y', $ArchivePath))
+    $szArgs.AddRange([string[]]@('a', '-t7z', "-mx=$effectiveLevel", '-y', $ArchivePath))
     foreach ($sp in $SourcePath) { $szArgs.Add($sp) }
-    if ($LowResource) { $szArgs.Add('-mmt=off') } else { $szArgs.Add('-mmt=on') }   # multi-threaded compression - 7-Zip supports this for both zip (deflate) and 7z
-    if ($VolumeSizeMB -gt 0) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes - always native now, see $effectiveFormat above
+    if ($LowResource) { $szArgs.Add('-mmt=off') } else { $szArgs.Add('-mmt=on') }   # multi-threaded compression
+    if ($VolumeSizeMB -gt 0) { $szArgs.Add("-v${VolumeSizeMB}m") }   # native 7z volumes
     if ($ExtraFiles)      { foreach ($ef in $ExtraFiles) { $szArgs.Add($ef) } }
     if ($Password) {
         $szArgs.Add("-p$Password")
-        if ($effectiveFormat -eq '7z') { $szArgs.Add('-mhe=on') }      # encrypt headers too
+        $szArgs.Add('-mhe=on')   # encrypt headers too
     }
     if ($ExcludePatterns) {
         foreach ($x in $ExcludePatterns) { $szArgs.Add("-xr!$x") }
@@ -415,7 +395,6 @@ function New-A4950Archive {
         Success     = $false
         Cancelled   = $false
         ArchivePath = $ArchivePath
-        Format      = $effectiveFormat   # what was actually written - can differ from the requested Format when split
         Files       = @()               # actual output file(s): the archive, or its volume parts
         IsSplit     = ($VolumeSizeMB -gt 0)
         ExitCode    = -1
@@ -797,28 +776,6 @@ function Write-A4950TransferLog {
     return $LogPath
 }
 
-function Test-A4950TransferIntegrity {
-    <#
-    .SYNOPSIS Verify a transferred file matches the source by SHA-256.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$SourceFile,
-        [Parameter(Mandatory)][string]$DestinationFile
-    )
-    if (-not (Test-Path -LiteralPath $DestinationFile)) {
-        return [pscustomobject]@{ Match = $false; Reason = 'Destination file missing' }
-    }
-    $s = (Get-FileHash -LiteralPath $SourceFile -Algorithm SHA256).Hash
-    $d = (Get-FileHash -LiteralPath $DestinationFile -Algorithm SHA256).Hash
-    return [pscustomobject]@{
-        Match       = ($s -eq $d)
-        SourceHash  = $s
-        DestHash    = $d
-        Reason      = if ($s -eq $d) { 'OK' } else { 'SHA-256 mismatch' }
-    }
-}
-
 #endregion
 
 #region ------------------------------------------------------------ System statistics
@@ -973,12 +930,11 @@ function Get-A4950CompressionRatio {
     #>
     [CmdletBinding()]
     param(
-        [ValidateRange(0, 9)][int]$Level,
-        [ValidateSet('7z', 'zip')][string]$Format = 'zip'
+        [ValidateRange(0, 9)][int]$Level
     )
     $table = @{ 0 = 1.00; 1 = 0.92; 2 = 0.87; 3 = 0.82; 4 = 0.75; 5 = 0.68; 6 = 0.62; 7 = 0.58; 8 = 0.55; 9 = 0.52 }
     $ratio = $table[$Level]
-    if ($Format -eq '7z' -and $Level -gt 0) { $ratio *= 0.93 }   # 7z format typically edges out zip
+    if ($Level -gt 0) { $ratio *= 0.93 }   # native 7z format typically edges out zip
     return [math]::Round($ratio, 3)
 }
 
@@ -1028,7 +984,7 @@ function New-A4950CaseFolderName {
         A trailing "." is a legal filename character but, left in place,
         collides with the "." that separates the archive extension - e.g. a
         case number typed as "CMS-A12345." would otherwise produce
-        "CMS-A12345..zip" (double dot). Trimmed here, along with trailing
+        "CMS-A12345..7z" (double dot). Trimmed here, along with trailing
         spaces (Windows itself silently drops trailing dots/spaces from
         names, so this only removes characters that wouldn't survive anyway).
     #>

@@ -19,22 +19,22 @@ optional pass number.
 | Prompt before acting | Yes/No dialog on insert (`AutoPromptOnInsert`), plus a final confirm |
 | Choose folders/files | Built entirely from standard Windows dialogs - **Browse Folders...** (folder browser, looped so several folders can be added in one flow; each captured recursively, in full) and **Add Files...** (multi-select file picker) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
 | Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. Picking a drive from this dropdown by hand opens a folder browser rooted at that drive so you can pick a folder/sub-folder straight from it. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
-| Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
+| Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the archive names |
 | Completion summary | When a job finishes, an on-screen message shows the Source and Destination locations, start/finish time, number of files/folders and original vs. compressed size — in addition to the destination path and file names logged to the Activity Log and the "Transfer finished" popup |
-| Slow Machine Mode | Header button for old/low-spec hardware: turns off the System Monitor's CPU/Memory/Network/Temp polling and forces single-threaded, store-only (no compression math) 7-Zip — trades speed for the smallest possible CPU/RAM footprint. Hashing, manifest and verification are unaffected |
+| Slow Machine Mode | Header button for old/low-spec hardware: turns off the System Monitor's CPU/Memory/Network/Temp polling and forces single-threaded, store-only (no compression math) 7-Zip — trades speed for the smallest possible CPU/RAM footprint. Hashing and the manifest are unaffected |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
 | Job queue | **Add to Queue** snapshots the current selection, identifiers and Options into a queue entry, then clears the screen to build the next one. **Start Queue** runs queued jobs one after another automatically. Each entry has its own **Edit** (recall it onto the screen to change anything) and **Remove** (cancel it outright); **Stop Queue** halts auto-advance without touching whatever job is currently running |
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
-| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest, no verify**) — warns first that integrity is not recorded |
+| Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
-| Compress with 7-Zip | `7z.exe`, level 0–9, `zip` (default) or `7z`, optional AES-256 password, **multi-threaded** (`-mmt=on`) for both formats |
-| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file. **A split always uses native 7z volumes**, regardless of the configured archive format — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
+| Compress with 7-Zip | `7z.exe`, level 0–9, always native **7z** format, optional AES-256 password, **multi-threaded** (`-mmt=on`) |
+| Split into multiple files | Split-size **dropdown** (presets or custom MB; default **2 GB**); `0` = single file. **A split always uses native 7z volumes** — see [Archives are always native 7z](#archives-are-always-native-7z) below |
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
 | Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Archive volume transfer mode | Options choice for a split archive, under the **ARCHIVE VOLUME TRANSFER** heading: **Wait for All Files** (default, safest — waits for the whole archive) or **Transfer Immediately** (each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest). Quick Transfer always turns this on. Un-split archives are unaffected either way — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
+| Archive volume transfer mode | Options choice for a split archive, under the **ARCHIVE VOLUME TRANSFER** heading: **Transfer Immediately** (default — each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest) or **Wait for All Files** (safest — waits for the whole archive). Quick Transfer always turns Immediate on. Un-split archives are unaffected either way — see [Archives are always native 7z](#archives-are-always-native-7z) below |
 | `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — true in both transfer modes, since 7-Zip itself only finalises `.001` at the very end of the run regardless. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
@@ -44,7 +44,6 @@ optional pass number.
 | Full-screen GUI | The window opens maximised |
 | Collapsible Options | "Hide Options" in the header collapses the Options panel, giving the Activity Log more room |
 | Real-time events/log | Colour-coded activity log (auto-scrolls) with hashes, file names, dates/times; per-case `.log` file |
-| Post-transfer verification | Re-hash the archive at the destination (SHA-256 match) |
 | Notification sounds | A sound plays on start, on a clean finish, and on any error. Pick your own `.wav` per event in Options → **SOUNDS**, or leave any of them blank to fall back to a standard Windows sound (Beep / Asterisk / Hand), respecting your OS volume/mute |
 | Enhanced log & transfer-log detail | Start time, finish time, number of files, number of folders, and total (original) vs. compressed ("zipped") size are recorded in the Activity Log, the worker log and the `TRANSFER.log` sent to the destination |
 | Text size & Dark Mode | Options → **APPEARANCE**: choose Small / Medium / Large / Extra Large text size, and toggle Dark Mode on/off — both apply immediately, no restart needed |
@@ -120,11 +119,11 @@ Or right-click either `.ps1` and choose **Run with PowerShell**.
 All options — including **sizing/volume split** — live in the **Options** panel on
 the main screen; **Save Options** persists them.
 
-Output at the destination (default: `zip` format, split into 2 GB volumes;
-everything selected is always combined into ONE archive). Files land
-**directly in the destination — no per-case sub-folder** — so the name itself
-carries the CMS case and/or OP name, pass number if given, and this job's
-timestamp, keeping every job's files unique there:
+Output at the destination (native **7z** format, split into 2 GB volumes by
+default; everything selected is always combined into ONE archive). Files
+land **directly in the destination — no per-case sub-folder** — so the name
+itself carries the CMS case and/or OP name, pass number if given, and this
+job's timestamp, keeping every job's files unique there:
 
 ```
 C:\Destination\
@@ -132,17 +131,17 @@ C:\Destination\
     CMS-A12345_20260818_143000.7z.002      (volume 2)
 ```
 
-> When **split** is off (`VolumeSizeMB = 0`) you get a single file in
-> whichever format is configured, e.g. `CMS-A12345_20260818_143000.zip`.
+> When **split** is off (`VolumeSizeMB = 0`) you get a single file instead:
+> `CMS-A12345_20260818_143000.7z`.
 
-#### Split archives are always native 7z
+#### Archives are always native 7z
 
-> A split archive is **always** built as native 7z volumes, regardless of the
-> configured archive format — `ArchiveFormat: zip` only takes effect for an
-> **un-split** archive. This isn't a preference, it's a correctness fix:
-> 7-Zip's own volume switch (`-v`) only splits its native `.7z` container — it
-> silently ignores `-v` for `.zip` (writes one whole file and exits 0 as if
-> nothing were wrong). An earlier version of this tool worked around that by
+> Every archive — split or not — is built as native **7z**, requiring 7-Zip
+> (or a compatible tool) at the receiving end to open. This isn't a
+> preference, it's a correctness fix for splitting specifically: 7-Zip's own
+> volume switch (`-v`) only splits its native `.7z` container — it silently
+> ignores `-v` for `.zip` (writes one whole file and exits 0 as if nothing
+> were wrong). An earlier version of this tool worked around that by
 > raw-byte-splitting a finished `.zip` itself into `.001`/`.002`/… parts. That
 > turned out to be a real integrity risk: 7-Zip only ever reports a genuine,
 > checked volume count (`Volumes = N`) for its *own* native multi-volume
@@ -161,31 +160,28 @@ C:\Destination\
 > Reassemble by opening the `.001` file in 7-Zip (all parts must be in the
 > same folder), or from the command line: `7z x CMS-A12345_20260818_143000.7z.001`.
 > Plain `copy /b`/`cat` concatenation does **not** work for native 7z volumes
-> (unlike the old raw byte split) — you need 7-Zip (or a compatible tool like
-> `7-Zip-zstd`/`p7zip`/`py7zr`) at the receiving end to open a split delivery.
-> If that's a hard requirement for some recipients, keep archives **un-split**
-> (`VolumeSizeMB = 0`) — 7-Zip's normal `zip` creation there is completely
-> standard and opens with any zip utility.
+> — you need 7-Zip (or a compatible tool like `7-Zip-zstd`/`p7zip`/`py7zr`) at
+> the receiving end to open a split delivery.
 >
 > **Archive volume transfer mode** (Options → "ARCHIVE VOLUME TRANSFER",
 > only relevant when split) controls *when* each volume is picked up for
 > transfer:
-> - **Wait for All Files** (default): 7-Zip is a black box
->   while running, so every volume is picked up for transfer together, only
->   once the whole process has exited and every volume is confirmed complete.
-> - **Transfer Immediately**: each volume is picked up for transfer the
->   moment 7-Zip finishes writing it, well before the rest of the archive is
->   done. Verified against real 7-Zip 23.01: 7-Zip writes each volume to a
->   `.tmp` file and only renames it to its final name once that volume's
->   content is completely flushed and will never be touched again — that
->   rename is the completion signal this mode watches for (with an
->   exclusive-open probe as a second, best-effort check before treating a
->   volume as safe to move).
+> - **Transfer Immediately** (default): each volume is picked up for
+>   transfer the moment 7-Zip finishes writing it, well before the rest of
+>   the archive is done. Verified against real 7-Zip 23.01: 7-Zip writes
+>   each volume to a `.tmp` file and only renames it to its final name once
+>   that volume's content is completely flushed and will never be touched
+>   again — that rename is the completion signal this mode watches for
+>   (with an exclusive-open probe as a second, best-effort check before
+>   treating a volume as safe to move).
+> - **Wait for All Files**: 7-Zip is a black box while running, so every
+>   volume is picked up for transfer together, only once the whole process
+>   has exited and every volume is confirmed complete.
 >
 > **`.001` is always the LAST volume to actually arrive at the destination,
 > in either mode.** Every other volume transfers as soon as it's ready (in
-> Instant mode) or as part of the completed batch (in the default mode), but
-> `.001` is deliberately held back until they've all been queued — and this
+> Instant mode) or as part of the completed batch (in Wait for All Files
+> mode), but `.001` is deliberately held back until they've all been queued — and this
 > isn't just a safety margin, it matches 7-Zip's own behaviour: confirmed
 > empirically, 7-Zip defers finalising volume `.001` until the exact same
 > instant as the very last volume, regardless of transfer mode, since the
@@ -255,14 +251,12 @@ See `config.example.json`. Key settings:
 
 - **NetworkShare** — destination (UNC share or local folder), default `C:\Destination`.
 - **SevenZipPath** — leave blank to auto-detect.
-- **ArchiveFormat** — `zip` (default, portable) or `7z` (smaller, AES-256).
-- All selected folders/files are always combined into **one** archive — this
-  is fixed behavior, not a setting.
+- All selected folders/files are always combined into **one** native 7z
+  archive — this is fixed behavior, not a setting.
 - **VolumeSizeMB** — split the archive into volumes of this size in MB
   (default **2048** = 2 GB); `0` = one file. Changeable in Setup **and** Settings.
 - **CompressionLevel** — `0` (store, fastest) … `9` (ultra, smallest).
 - **HashAlgorithms** — any of `SHA256`, `MD5`.
-- **VerifyAfterTransfer** — re-hash the archive at the destination.
 - **StagingFolder** — local temp area for archives before transfer, default `C:\temp`.
   Local copies are **always kept** here after a completed job - there's no
   auto-delete setting. Remove them manually, or via **Delete Local Copies** on
@@ -302,7 +296,6 @@ flag an obvious shortfall, not to predict the exact archive size.
 ## Suggested enhancements (implemented / recommended)
 
 **Implemented**
-- Post-transfer SHA-256 verification of each archive.
 - Embedded + sidecar hash manifest (`.txt` and `.csv`).
 - AES-256 archive encryption option.
 - robocopy transfer with retry + Copy-Item fallback.
