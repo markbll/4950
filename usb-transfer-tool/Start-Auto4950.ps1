@@ -24,7 +24,7 @@ param()
 # Bootstrapping
 # ----------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '3.0'
+$script:AppVersion = '4.0'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -82,36 +82,73 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
         Title="Auto 49/50 - USB Compression &amp; Transfer Tool" Height="820" Width="1460"
-        WindowStartupLocation="CenterScreen" WindowState="Maximized" Background="#FF1E1E24" FontFamily="Segoe UI">
+        WindowStartupLocation="CenterScreen" WindowState="Maximized" Background="{DynamicResource WindowBg}" FontFamily="Segoe UI">
   <Window.Resources>
-    <SolidColorBrush x:Key="Panel"  Color="#FF2A2A33"/>
-    <SolidColorBrush x:Key="Accent" Color="#FF4FC3F7"/>
-    <SolidColorBrush x:Key="Text"   Color="#FFECECEC"/>
-    <SolidColorBrush x:Key="Muted"  Color="#FF9AA0A6"/>
-    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
-    <Style TargetType="Label"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
+    <!-- Theme surface colors - all DynamicResource so Dark Mode can swap them
+         at runtime (see Set-A4950Theme). Semantic/status colors (buttons like
+         Start/Cancel/Quick Transfer, progress bar fills, log line colors) are
+         deliberately left as fixed colors - they carry meaning independent of
+         light/dark and stay legible either way. -->
+    <SolidColorBrush x:Key="WindowBg"    Color="#FF1E1E24"/>
+    <SolidColorBrush x:Key="Panel"       Color="#FF2A2A33"/>
+    <SolidColorBrush x:Key="Accent"      Color="#FF4FC3F7"/>
+    <SolidColorBrush x:Key="Text"        Color="#FFECECEC"/>
+    <SolidColorBrush x:Key="Muted"       Color="#FF9AA0A6"/>
+    <SolidColorBrush x:Key="InputBg"     Color="#FF20202A"/>
+    <SolidColorBrush x:Key="InputBorder" Color="#FF444450"/>
+    <SolidColorBrush x:Key="LogBg"       Color="#FF14141A"/>
+    <SolidColorBrush x:Key="ButtonBg"    Color="#FF3A3A46"/>
+
+    <!-- Font-size tiers - all DynamicResource so the Font Size option
+         (Small/Medium/Large/Extra Large) can rescale every piece of text at
+         once (see Set-A4950FontScale). Values here are the Medium defaults. -->
+    <sys:Double x:Key="FSTiny">12</sys:Double>
+    <sys:Double x:Key="FSBody">13</sys:Double>
+    <sys:Double x:Key="FSHeading">15</sys:Double>
+    <sys:Double x:Key="FSLarge">14</sys:Double>
+    <sys:Double x:Key="FSTitle">22</sys:Double>
+
+    <Style TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
+    </Style>
     <Style TargetType="TextBox">
-      <Setter Property="Background" Value="#FF20202A"/>
-      <Setter Property="Foreground" Value="{StaticResource Text}"/>
-      <Setter Property="BorderBrush" Value="#FF444450"/>
+      <Setter Property="Background" Value="{DynamicResource InputBg}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
       <Setter Property="Padding" Value="4"/>
       <Setter Property="Margin" Value="0,2,0,8"/>
     </Style>
     <Style TargetType="CheckBox">
-      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
       <Setter Property="Margin" Value="0,3"/>
     </Style>
-    <Style TargetType="ComboBox"><Setter Property="Margin" Value="0,2,0,8"/></Style>
+    <Style TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Margin" Value="0,2,0,8"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
+    </Style>
     <Style x:Key="Card" TargetType="Border">
-      <Setter Property="Background" Value="{StaticResource Panel}"/>
+      <Setter Property="Background" Value="{DynamicResource Panel}"/>
       <Setter Property="CornerRadius" Value="8"/>
       <Setter Property="Padding" Value="12"/>
       <Setter Property="Margin" Value="6"/>
     </Style>
     <Style TargetType="Button">
-      <Setter Property="Background" Value="#FF3A3A46"/>
-      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="Background" Value="{DynamicResource ButtonBg}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="FontSize" Value="{DynamicResource FSBody}"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="12,7"/>
       <Setter Property="Margin" Value="4"/>
@@ -137,11 +174,11 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
         <StackPanel VerticalAlignment="Center">
           <StackPanel Orientation="Horizontal">
             <TextBlock FontSize="22" FontWeight="Bold">
-              <Run Text="Auto " Foreground="{StaticResource Text}"/><Run Text="49/50" Foreground="{StaticResource Accent}"/>
+              <Run Text="Auto " Foreground="{DynamicResource Text}"/><Run Text="49/50" Foreground="{DynamicResource Accent}"/>
             </TextBlock>
-            <TextBlock x:Name="LblVersion" Text="v0.0.0" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Bottom" Margin="8,0,0,4"/>
+            <TextBlock x:Name="LblVersion" Text="v0.0.0" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Bottom" Margin="8,0,0,4"/>
           </StackPanel>
-          <TextBlock x:Name="StatusLine" Text="Idle - waiting for a USB drive to be connected." Foreground="{StaticResource Muted}" Margin="0,2,0,0"/>
+          <TextBlock x:Name="StatusLine" Text="Idle - waiting for a USB drive to be connected." Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnQuick"    Content="Quick Transfer" Background="#FF7B5BD1"/>
@@ -166,36 +203,36 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
       <Border Grid.Column="0" Style="{StaticResource Card}">
         <StackPanel>
           <StackPanel x:Name="PanelSysMonitor">
-            <TextBlock Text="SYSTEM MONITOR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,8"/>
+            <TextBlock Text="SYSTEM MONITOR" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,0,0,8"/>
 
             <TextBlock Text="CPU"/>
             <ProgressBar x:Name="BarCpu" Height="14" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A"/>
-            <TextBlock x:Name="LblCpu" Text="0 %" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock x:Name="LblCpu" Text="0 %" Foreground="{DynamicResource Muted}" Margin="0,2,0,10"/>
 
             <TextBlock Text="Memory"/>
             <ProgressBar x:Name="BarMem" Height="14" Minimum="0" Maximum="100" Foreground="#FFFFA726" Background="#FF20202A"/>
-            <TextBlock x:Name="LblMem" Text="0 % (0 / 0 MB)" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock x:Name="LblMem" Text="0 % (0 / 0 MB)" Foreground="{DynamicResource Muted}" Margin="0,2,0,10"/>
 
             <TextBlock Text="Network Throughput"/>
-            <ProgressBar x:Name="BarNet" Height="14" Minimum="0" Maximum="1000" Foreground="{StaticResource Accent}" Background="#FF20202A"/>
-            <TextBlock x:Name="LblNet" Text="0 Mbps" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <ProgressBar x:Name="BarNet" Height="14" Minimum="0" Maximum="1000" Foreground="{DynamicResource Accent}" Background="#FF20202A"/>
+            <TextBlock x:Name="LblNet" Text="0 Mbps" Foreground="{DynamicResource Muted}" Margin="0,2,0,10"/>
 
             <TextBlock Text="Temp Folder Free Space"/>
             <ProgressBar x:Name="BarTemp" Height="14" Minimum="0" Maximum="100" Foreground="#FFAB47BC" Background="#FF20202A"/>
-            <TextBlock x:Name="LblTemp" Text="0 GB free" Foreground="{StaticResource Muted}" Margin="0,2,0,10"/>
+            <TextBlock x:Name="LblTemp" Text="0 GB free" Foreground="{DynamicResource Muted}" Margin="0,2,0,10"/>
             <Separator Margin="0,6"/>
           </StackPanel>
-          <TextBlock x:Name="LblSlowMachineNote" Text="System Monitor is off (Slow Machine Mode)." Foreground="{StaticResource Muted}" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+          <TextBlock x:Name="LblSlowMachineNote" Text="System Monitor is off (Slow Machine Mode)." Foreground="{DynamicResource Muted}" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
 
-          <TextBlock Text="Job Progress" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,4,0,4"/>
-          <TextBlock x:Name="LblStage" Text="No job running" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+          <TextBlock Text="Job Progress" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,4,0,4"/>
+          <TextBlock x:Name="LblStage" Text="No job running" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/>
           <ProgressBar x:Name="BarJob" Height="16" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A" Margin="0,4,0,0"/>
-          <TextBlock x:Name="LblJob" Text="" Foreground="{StaticResource Muted}" Margin="0,2,0,0"/>
+          <TextBlock x:Name="LblJob" Text="" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/>
 
-          <TextBlock Text="Transfer Status" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,10,0,4"/>
-          <TextBlock x:Name="LblXfer" Text="Idle" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+          <TextBlock Text="Transfer Status" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,10,0,4"/>
+          <TextBlock x:Name="LblXfer" Text="Idle" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/>
           <ProgressBar x:Name="BarXfer" Height="12" Foreground="#FF4FC3F7" Background="#FF20202A" Margin="0,4,0,0"/>
-          <TextBlock x:Name="LblXferCount" Text="0 file(s) transferred" Foreground="{StaticResource Muted}" Margin="0,2,0,0"/>
+          <TextBlock x:Name="LblXferCount" Text="0 file(s) transferred" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/>
         </StackPanel>
       </Border>
 
@@ -214,27 +251,27 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
           </Grid.RowDefinitions>
 
           <StackPanel Grid.Row="0">
-            <TextBlock Text="CMS CASE NUMBER" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+            <TextBlock Text="CMS CASE NUMBER" FontWeight="Bold" Foreground="{DynamicResource Accent}"/>
             <TextBox x:Name="TxtCase" Text="CMS-A" Padding="6" FontSize="14"/>
-            <TextBlock x:Name="LblCaseHint" Text="Part of the folder / file name. Must start with the case prefix." Foreground="{StaticResource Muted}" FontSize="11"/>
+            <TextBlock x:Name="LblCaseHint" Text="Part of the folder / file name. Must start with the case prefix." Foreground="{DynamicResource Muted}" FontSize="11"/>
           </StackPanel>
 
           <Grid Grid.Row="1" Margin="0,8,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Margin="0,0,6,0">
-              <TextBlock Text="OP NAME (UPPERCASE)" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+              <TextBlock Text="OP NAME (UPPERCASE)" FontWeight="Bold" Foreground="{DynamicResource Accent}"/>
               <TextBox x:Name="TxtOp" Padding="6" FontSize="14" CharacterCasing="Upper"/>
-              <TextBlock x:Name="LblOpHint" Text="UPPERCASE. Optional." Foreground="{StaticResource Muted}" FontSize="11"/>
+              <TextBlock x:Name="LblOpHint" Text="UPPERCASE. Optional." Foreground="{DynamicResource Muted}" FontSize="11"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Margin="6,0,0,0">
-              <TextBlock Text="PASS NUMBER" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+              <TextBlock Text="PASS NUMBER" FontWeight="Bold" Foreground="{DynamicResource Accent}"/>
               <TextBox x:Name="TxtPass" Padding="6" FontSize="14"/>
-              <TextBlock x:Name="LblPassHint" Text="Operator's pass no. Optional." Foreground="{StaticResource Muted}" FontSize="11"/>
+              <TextBlock x:Name="LblPassHint" Text="Operator's pass no. Optional." Foreground="{DynamicResource Muted}" FontSize="11"/>
             </StackPanel>
           </Grid>
 
           <TextBlock Grid.Row="2" x:Name="LblNamePreview" Text="File name: (enter a CMS case or OP name)"
-                     Foreground="{StaticResource Muted}" FontStyle="Italic" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                     Foreground="{DynamicResource Muted}" FontStyle="Italic" Margin="0,6,0,0" TextWrapping="Wrap"/>
 
           <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,4">
             <TextBlock Text="Source drive:" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -247,23 +284,23 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
               <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="White"/>
               <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="White"/>
             </StackPanel>
-            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick one, then choose to add another; sub-folders are included automatically) or Add Files for individual files (multi-select)." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick one, then choose to add another; sub-folders are included automatically) or Add Files for individual files (multi-select)." Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
 
           <Grid Grid.Row="5" Margin="0,2,0,2">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Selection:" FontWeight="Bold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="0" Text="Selection:" FontWeight="Bold" Foreground="{DynamicResource Accent}" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
               <Button x:Name="BtnClearSelection" Content="Clear Selection"/>
             </StackPanel>
           </Grid>
 
           <Border Grid.Row="6" Background="#FF20202A" CornerRadius="6" Margin="0,4">
-            <ListBox x:Name="LstItems" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
+            <ListBox x:Name="LstItems" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text}"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
           </Border>
 
-          <TextBlock Grid.Row="7" x:Name="LblSelCount" Text="0 items selected" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
+          <TextBlock Grid.Row="7" x:Name="LblSelCount" Text="0 items selected" Foreground="{DynamicResource Muted}" Margin="0,4,0,0"/>
         </Grid>
       </Border>
 
@@ -275,7 +312,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
-          <TextBlock Grid.Row="0" Text="OPTIONS" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,6"/>
+          <TextBlock Grid.Row="0" Text="OPTIONS" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,0,0,6"/>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
             <StackPanel>
               <TextBlock Text="Destination (UNC share or local folder)"/>
@@ -297,11 +334,11 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
               <TextBox x:Name="OptPrefix"/>
 
               <Separator Margin="0,6"/>
-              <TextBlock Text="SIZING / COMPRESSION" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,4"/>
+              <TextBlock Text="SIZING / COMPRESSION" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
               <TextBlock Text="Archive format"/>
               <ComboBox x:Name="OptFormat"><ComboBoxItem>zip</ComboBoxItem><ComboBoxItem>7z</ComboBoxItem></ComboBox>
               <TextBlock Text="All selected folders/files are always combined into ONE archive."
-                         Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                         Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,0,0,8"/>
               <TextBlock Text="Split size (per volume)"/>
               <ComboBox x:Name="OptVolume" IsEditable="True">
                 <ComboBoxItem>No split (single file)</ComboBoxItem>
@@ -312,30 +349,62 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
                 <ComboBoxItem>5120</ComboBoxItem>
                 <ComboBoxItem>8192</ComboBoxItem>
               </ComboBox>
-              <TextBlock Text="(value in MB; type a custom number or pick a preset)" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,6"/>
-              <TextBlock Text="Archive volume transfer"/>
-              <RadioButton x:Name="OptXferOnComplete" GroupName="XferMode" Content="Transfer all files once completed" Margin="0,2,0,0" IsChecked="True"/>
-              <RadioButton x:Name="OptXferInstant"    GroupName="XferMode" Content="Transfer files instantly" Margin="0,2,0,0"/>
-              <TextBlock Text="'Once completed' waits for the whole archive before sending anything - safest, and required when there's no split. 'Instantly' sends each volume the moment 7-Zip finishes it, rather than waiting for the whole archive; the volume named .001 still always goes last either way, since 7-Zip itself only finalises it at the very end." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6"/>
+              <TextBlock Text="(value in MB; type a custom number or pick a preset)" Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" Margin="0,0,0,6"/>
               <TextBlock x:Name="OptLevelLbl" Text="Compression level: 5"/>
               <Slider x:Name="OptLevel" Minimum="0" Maximum="9" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,8"/>
               <TextBlock Text="Password (AES-256, optional)"/>
-              <PasswordBox x:Name="OptPwd" Background="#FF20202A" Foreground="#FFECECEC" BorderBrush="#FF444450" Padding="4" Margin="0,2,0,8"/>
+              <PasswordBox x:Name="OptPwd" Background="{DynamicResource InputBg}" Foreground="{DynamicResource Text}" BorderBrush="{DynamicResource InputBorder}" FontSize="{DynamicResource FSBody}" Padding="4" Margin="0,2,0,8"/>
 
               <Separator Margin="0,6"/>
-              <TextBlock Text="HASHING &amp; INTEGRITY" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,4"/>
+              <TextBlock Text="ARCHIVE VOLUME TRANSFER" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
+              <RadioButton x:Name="OptXferOnComplete" GroupName="XferMode" Content="Wait for All Files" Margin="0,2,0,0" IsChecked="True"/>
+              <RadioButton x:Name="OptXferInstant"    GroupName="XferMode" Content="Transfer Immediately" Margin="0,2,0,0"/>
+              <TextBlock Text="'Wait for All Files' waits for the whole archive before sending anything - safest, and used automatically when there's no split. 'Transfer Immediately' sends each volume the moment 7-Zip finishes it, rather than waiting for the whole archive; the volume named .001 still always goes last either way, since 7-Zip itself only finalises it at the very end." Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,2,0,6"/>
+
+              <Separator Margin="0,6"/>
+              <TextBlock Text="HASHING &amp; INTEGRITY" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
               <CheckBox x:Name="OptSha"    Content="Hash SHA-256"/>
               <CheckBox x:Name="OptMd5"    Content="Hash MD5"/>
               <CheckBox x:Name="OptEmbed"  Content="Embed hash manifest in archive"/>
               <CheckBox x:Name="OptVerify" Content="Verify archive at destination"/>
 
               <Separator Margin="0,6"/>
-              <TextBlock Text="BEHAVIOUR" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,2,0,4"/>
+              <TextBlock Text="BEHAVIOUR" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
               <CheckBox x:Name="OptPrompt"     Content="Prompt on USB insert"/>
               <CheckBox x:Name="OptSelDefault" Content="Select all folders/files by default"/>
-              <TextBlock Text="Local copies (in the staging folder) are always kept until you delete them - manually, or via &quot;Delete Local Copies&quot; on the transfer-finished window." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,4"/>
+              <TextBlock Text="Local copies (in the staging folder) are always kept until you delete them - manually, or via &quot;Delete Local Copies&quot; on the transfer-finished window." Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,4,0,4"/>
               <TextBlock Text="Exclude patterns (comma separated)"/>
               <TextBox x:Name="OptExcl"/>
+
+              <Separator Margin="0,6"/>
+              <TextBlock Text="SOUNDS" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
+              <TextBlock Text="Played on start / finish / error. Leave blank to use the standard Windows sound." Foreground="{DynamicResource Muted}" FontSize="{DynamicResource FSTiny}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+              <TextBlock Text="Start sound (.wav, optional)"/>
+              <DockPanel>
+                <Button x:Name="BtnBrowseSoundStart" Content="Browse..." DockPanel.Dock="Right" Margin="6,2,0,8" Foreground="#FF202020"/>
+                <TextBox x:Name="OptSoundStart"/>
+              </DockPanel>
+              <TextBlock Text="Finish sound (.wav, optional)"/>
+              <DockPanel>
+                <Button x:Name="BtnBrowseSoundFinish" Content="Browse..." DockPanel.Dock="Right" Margin="6,2,0,8" Foreground="#FF202020"/>
+                <TextBox x:Name="OptSoundFinish"/>
+              </DockPanel>
+              <TextBlock Text="Error sound (.wav, optional)"/>
+              <DockPanel>
+                <Button x:Name="BtnBrowseSoundError" Content="Browse..." DockPanel.Dock="Right" Margin="6,2,0,8" Foreground="#FF202020"/>
+                <TextBox x:Name="OptSoundError"/>
+              </DockPanel>
+
+              <Separator Margin="0,6"/>
+              <TextBlock Text="APPEARANCE" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,2,0,4"/>
+              <TextBlock Text="Text size"/>
+              <ComboBox x:Name="OptFontSize">
+                <ComboBoxItem Tag="Small">Small</ComboBoxItem>
+                <ComboBoxItem Tag="Medium">Medium</ComboBoxItem>
+                <ComboBoxItem Tag="Large">Large</ComboBoxItem>
+                <ComboBoxItem Tag="ExtraLarge">Extra Large</ComboBoxItem>
+              </ComboBox>
+              <CheckBox x:Name="OptDarkMode" Content="Dark Mode" Margin="0,2,0,0"/>
             </StackPanel>
           </ScrollViewer>
           <Button Grid.Row="2" x:Name="BtnSaveOptions" Content="Save Options" Background="#FF2E7D32" Margin="0,6,0,0"/>
@@ -351,7 +420,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="1*"/>
           </Grid.RowDefinitions>
-          <TextBlock Grid.Row="0" Text="REAL-TIME ACTIVITY LOG" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Accent}" Margin="0,0,0,8"/>
+          <TextBlock Grid.Row="0" Text="REAL-TIME ACTIVITY LOG" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource Accent}" Margin="0,0,0,8"/>
           <Border Grid.Row="1" Background="#FF14141A" CornerRadius="6">
             <RichTextBox x:Name="TxtLog" Background="Transparent" Foreground="#FFD4D4D4" BorderThickness="0" Padding="8"
                          FontFamily="Consolas" FontSize="13" IsReadOnly="True"
@@ -361,8 +430,8 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
           <Grid Grid.Row="2" Margin="0,10,0,4">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-              <TextBlock Text="JOB QUEUE" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
-              <TextBlock x:Name="LblQueueCount" Text="0 job(s) queued" Foreground="{StaticResource Muted}" FontSize="11"/>
+              <TextBlock Text="JOB QUEUE" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource Accent}"/>
+              <TextBlock x:Name="LblQueueCount" Text="0 job(s) queued" Foreground="{DynamicResource Muted}" FontSize="11"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
               <Button x:Name="BtnStartQueue" Content="Start Queue" Background="#FF2E7D32" IsEnabled="False"/>
@@ -370,7 +439,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
             </StackPanel>
           </Grid>
           <Border Grid.Row="3" Background="#FF14141A" CornerRadius="6">
-            <ListBox x:Name="LstQueue" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
+            <ListBox x:Name="LstQueue" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Text}"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
           </Border>
         </Grid>
@@ -384,7 +453,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <TextBlock x:Name="LblDest" Grid.Column="0" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
+        <TextBlock x:Name="LblDest" Grid.Column="0" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"
                    Text="Destination: (configure in the Options panel)"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
           <Button x:Name="BtnAddQueue" Content="Add to Queue" Background="#FF3A3A80"/>
@@ -411,18 +480,83 @@ $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
 # Logging helper (writes coloured lines to the RichTextBox)
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
-# Notification sounds (Windows system sounds - respects the OS volume/mute)
+# Notification sounds - an optional .wav per event (Options), falling back to
+# a standard Windows system sound (respects the OS volume/mute) when no .wav
+# is configured or the configured file can't be found/played.
 # ----------------------------------------------------------------------------
 $script:LastErrorSoundAt = [DateTime]::MinValue
+
+function Invoke-A4950Sound {
+    param([string]$WavPath, [System.Media.SystemSound]$Fallback)
+    if ($WavPath -and (Test-Path -LiteralPath $WavPath -PathType Leaf)) {
+        try {
+            $player = New-Object System.Media.SoundPlayer $WavPath
+            $player.Play()
+            return
+        } catch {
+            Add-LogLine "Could not play sound file '$WavPath': $($_.Exception.Message). Using the standard sound instead." 'WARN'
+        }
+    }
+    try { $Fallback.Play() } catch {}
+}
+
+function Play-A4950StartSound {
+    Invoke-A4950Sound -WavPath $config.SoundStartPath -Fallback ([System.Media.SystemSounds]::Beep)
+}
+
+function Play-A4950CompletedSound {
+    Invoke-A4950Sound -WavPath $config.SoundFinishPath -Fallback ([System.Media.SystemSounds]::Asterisk)
+}
+
 function Play-A4950ErrorSound {
     # Throttled so a burst of errors doesn't machine-gun the sound.
     if (([DateTime]::Now - $script:LastErrorSoundAt).TotalMilliseconds -lt 400) { return }
     $script:LastErrorSoundAt = [DateTime]::Now
-    try { [System.Media.SystemSounds]::Hand.Play() } catch {}
+    Invoke-A4950Sound -WavPath $config.SoundErrorPath -Fallback ([System.Media.SystemSounds]::Hand)
 }
 
-function Play-A4950CompletedSound {
-    try { [System.Media.SystemSounds]::Asterisk.Play() } catch {}
+# ----------------------------------------------------------------------------
+# Appearance - Dark/Light theme and Small/Medium/Large/Extra Large text size.
+# Brushes are mutated in place (not replaced) so both DynamicResource-bound
+# XAML and the transfer-progress popup (built from $script:ThemeColors at
+# Show-ProgressWindow time) stay in sync; font-size resources are boxed
+# doubles so they're replaced wholesale instead.
+# ----------------------------------------------------------------------------
+$script:ThemeDark = [ordered]@{
+    WindowBg='#FF1E1E24'; Panel='#FF2A2A33'; Accent='#FF4FC3F7'; Text='#FFECECEC'; Muted='#FF9AA0A6'
+    InputBg='#FF20202A'; InputBorder='#FF444450'; LogBg='#FF14141A'; ButtonBg='#FF3A3A46'
+}
+$script:ThemeLight = [ordered]@{
+    WindowBg='#FFF2F2F5'; Panel='#FFFFFFFF'; Accent='#FF0277BD'; Text='#FF1A1A1A'; Muted='#FF5F6368'
+    InputBg='#FFFFFFFF'; InputBorder='#FFC9C9D2'; LogBg='#FFE8E8EC'; ButtonBg='#FFE3E3E9'
+}
+$script:ThemeColors = $script:ThemeDark
+$script:DarkMode = $true
+
+function Set-A4950Theme {
+    param([bool]$Dark = $true)
+    $script:DarkMode = $Dark
+    $palette = if ($Dark) { $script:ThemeDark } else { $script:ThemeLight }
+    $script:ThemeColors = $palette
+    $converter = New-Object System.Windows.Media.BrushConverter
+    foreach ($key in $palette.Keys) {
+        $brush = $window.Resources[$key]
+        if ($brush -is [System.Windows.Media.SolidColorBrush]) {
+            $brush.Color = ($converter.ConvertFromString($palette[$key])).Color
+        }
+    }
+}
+
+$script:FontBaseSizes = @{ FSTiny=12; FSBody=13; FSHeading=15; FSLarge=14; FSTitle=22 }
+$script:FontScaleFactors = [ordered]@{ Small=0.85; Medium=1.0; Large=1.15; ExtraLarge=1.35 }
+
+function Set-A4950FontScale {
+    param([string]$Size = 'Medium')
+    if (-not $script:FontScaleFactors.Contains($Size)) { $Size = 'Medium' }
+    $factor = $script:FontScaleFactors[$Size]
+    foreach ($key in $script:FontBaseSizes.Keys) {
+        $window.Resources[$key] = [double][Math]::Round($script:FontBaseSizes[$key] * $factor, 1)
+    }
 }
 
 function Add-RtbLine {
@@ -440,15 +574,35 @@ function Add-RtbLine {
     $Rtb.ScrollToEnd()
 }
 
+function Get-A4950LogColour {
+    <#
+    .SYNOPSIS Theme-aware log line colour - the plain dark-theme palette
+              reads poorly on a light background, so Light Mode uses darker,
+              more saturated variants for the same status meaning.
+    #>
+    param([string]$Level)
+    if ($script:DarkMode -eq $false) {
+        switch ($Level) {
+            'ERROR' { '#FFC62828' }
+            'WARN'  { '#FF8A6D00' }
+            'OK'    { '#FF2E7D32' }
+            'STEP'  { '#FF01579B' }
+            default { '#FF202020' }
+        }
+    } else {
+        switch ($Level) {
+            'ERROR' { '#FFEF5350' }
+            'WARN'  { '#FFFFCA28' }
+            'OK'    { '#FF66BB6A' }
+            'STEP'  { '#FF4FC3F7' }
+            default { '#FFD4D4D4' }
+        }
+    }
+}
+
 function Add-LogLine {
     param([string]$Text, [string]$Level = 'INFO')
-    $colour = switch ($Level) {
-        'ERROR' { '#FFEF5350' }
-        'WARN'  { '#FFFFCA28' }
-        'OK'    { '#FF66BB6A' }
-        'STEP'  { '#FF4FC3F7' }
-        default { '#FFD4D4D4' }
-    }
+    $colour = Get-A4950LogColour -Level $Level
     $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Text
     Add-RtbLine $ctrl.TxtLog $line $colour
     # Mirror into the transfer-progress popup when it is open.
@@ -856,6 +1010,11 @@ function Set-OptionsFromConfig {
     $ctrl.OptSelDefault.IsChecked = [bool]$config.DefaultSelectAll
     $ctrl.OptExcl.Text            = ($config.ExcludePatterns -join ', ')
     foreach ($it in $ctrl.OptFormat.Items) { if ($it.Content -eq $config.ArchiveFormat) { $ctrl.OptFormat.SelectedItem = $it } }
+    $ctrl.OptSoundStart.Text  = $config.SoundStartPath
+    $ctrl.OptSoundFinish.Text = $config.SoundFinishPath
+    $ctrl.OptSoundError.Text  = $config.SoundErrorPath
+    $ctrl.OptDarkMode.IsChecked = [bool]$config.DarkMode
+    foreach ($it in $ctrl.OptFontSize.Items) { if ($it.Tag -eq $config.FontSize) { $ctrl.OptFontSize.SelectedItem = $it } }
 }
 
 function Sync-OptionsToConfig {
@@ -877,6 +1036,11 @@ function Sync-OptionsToConfig {
     $config.DefaultSelectAll    = [bool]$ctrl.OptSelDefault.IsChecked
     $config.ExcludePatterns     = @($ctrl.OptExcl.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $config.Password            = $ctrl.OptPwd.Password
+    $config.SoundStartPath  = $ctrl.OptSoundStart.Text.Trim()
+    $config.SoundFinishPath = $ctrl.OptSoundFinish.Text.Trim()
+    $config.SoundErrorPath  = $ctrl.OptSoundError.Text.Trim()
+    $config.DarkMode        = [bool]$ctrl.OptDarkMode.IsChecked
+    if ($ctrl.OptFontSize.SelectedItem) { $config.FontSize = $ctrl.OptFontSize.SelectedItem.Tag }
     $script:Shared.Config       = $config
 }
 
@@ -956,6 +1120,15 @@ function Select-SevenZipFile {
     foreach ($seed in @("$env:ProgramW6432\7-Zip", "$env:ProgramFiles\7-Zip", "${env:ProgramFiles(x86)}\7-Zip")) {
         if ($seed -and (Test-Path -LiteralPath $seed)) { $dlg.InitialDirectory = $seed; break }
     }
+    if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+    return $null
+}
+
+function Select-WavFile {
+    param([string]$Title = 'Select a .wav sound file')
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title  = $Title
+    $dlg.Filter = 'WAV audio (*.wav)|*.wav|All files (*.*)|*.*'
     if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
     return $null
 }
@@ -1068,11 +1241,12 @@ function Update-Footer {
 function Show-ProgressWindow {
     param([string]$Name)
     Close-ProgressWindow
+    $tc = $script:ThemeColors
     [xml]$px = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Transfer in progress" Height="560" Width="820" WindowStartupLocation="CenterOwner"
-        Background="#FF1E1E24" FontFamily="Segoe UI">
+        Background="$($tc.WindowBg)" FontFamily="Segoe UI">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -1082,27 +1256,27 @@ function Show-ProgressWindow {
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
     <StackPanel Grid.Row="0">
-      <TextBlock x:Name="PTitle" Text="Transfer in progress" FontSize="18" FontWeight="Bold" Foreground="#FF4FC3F7"/>
-      <TextBlock x:Name="PStatus" Text="Starting..." Foreground="#FF9AA0A6" Margin="0,2,0,8"/>
+      <TextBlock x:Name="PTitle" Text="Transfer in progress" FontSize="18" FontWeight="Bold" Foreground="$($tc.Accent)"/>
+      <TextBlock x:Name="PStatus" Text="Starting..." Foreground="$($tc.Muted)" Margin="0,2,0,8"/>
     </StackPanel>
     <StackPanel Grid.Row="1">
-      <TextBlock x:Name="PStage" Text="Preparing..." Foreground="#FFECECEC"/>
-      <ProgressBar x:Name="PBarJob" Height="16" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="#FF20202A" Margin="0,4,0,8"/>
+      <TextBlock x:Name="PStage" Text="Preparing..." Foreground="$($tc.Text)"/>
+      <ProgressBar x:Name="PBarJob" Height="16" Minimum="0" Maximum="100" Foreground="#FF66BB6A" Background="$($tc.InputBg)" Margin="0,4,0,8"/>
     </StackPanel>
     <StackPanel Grid.Row="2">
-      <TextBlock x:Name="PXfer" Text="Transfer: idle" Foreground="#FFECECEC"/>
-      <ProgressBar x:Name="PBarXfer" Height="12" Foreground="#FF4FC3F7" Background="#FF20202A" Margin="0,4,0,2"/>
-      <TextBlock x:Name="PCount" Text="0 file(s) transferred" Foreground="#FF9AA0A6" Margin="0,0,0,8"/>
+      <TextBlock x:Name="PXfer" Text="Transfer: idle" Foreground="$($tc.Text)"/>
+      <ProgressBar x:Name="PBarXfer" Height="12" Foreground="$($tc.Accent)" Background="$($tc.InputBg)" Margin="0,4,0,2"/>
+      <TextBlock x:Name="PCount" Text="0 file(s) transferred" Foreground="$($tc.Muted)" Margin="0,0,0,8"/>
     </StackPanel>
-    <Border Grid.Row="3" Background="#FF14141A" CornerRadius="6">
-      <RichTextBox x:Name="PLog" Background="Transparent" Foreground="#FFD4D4D4" BorderThickness="0"
+    <Border Grid.Row="3" Background="$($tc.LogBg)" CornerRadius="6">
+      <RichTextBox x:Name="PLog" Background="Transparent" Foreground="$($tc.Text)" BorderThickness="0"
                    FontFamily="Consolas" FontSize="12" IsReadOnly="True"
                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
     </Border>
     <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
       <Button x:Name="PDelete" Content="Delete Local Copies" Padding="14,7" Margin="4" Background="#FF8E2A2A" Foreground="#FFECECEC" Visibility="Collapsed"/>
       <Button x:Name="PCancel" Content="Cancel Transfer" Padding="14,7" Margin="4" Background="#FF8E2A2A" Foreground="#FFECECEC"/>
-      <Button x:Name="PClose"  Content="Close" Padding="14,7" Margin="4" Background="#FF3A3A46" Foreground="#FFECECEC"/>
+      <Button x:Name="PClose"  Content="Close" Padding="14,7" Margin="4" Background="$($tc.ButtonBg)" Foreground="$($tc.Text)"/>
     </StackPanel>
   </Grid>
 </Window>
@@ -1132,6 +1306,34 @@ function Show-ProgressWindow {
     (& $g 'PDelete').Add_Click({ Remove-LocalCopies -Staging $script:LastJobStaging })
     $pw.Add_Closing({ $script:Prog = $null })
     $pw.Show()
+}
+
+function Show-A4950CompletionMessage {
+    <#
+    .SYNOPSIS On-screen summary shown when a transfer job finishes.
+    .DESCRIPTION
+        Only called for a real completion (full success or partial success
+        with some failures) - not for a cancelled or hard-errored job, where
+        Source/Destination/stats are either unset or not meaningful.
+    #>
+    param($Data, [string]$Outcome)
+    $started  = if ($Data.Started)  { $Data.Started.ToString('yyyy-MM-dd HH:mm:ss') } else { 'n/a' }
+    $finished = if ($Data.Finished) { $Data.Finished.ToString('yyyy-MM-dd HH:mm:ss') } else { 'n/a' }
+    $lines = @(
+        "Status        : $Outcome"
+        ""
+        "Source        : $($Data.Source)"
+        "Destination   : $($Data.Destination)"
+        ""
+        "Started       : $started"
+        "Finished      : $finished"
+        ""
+        "Files         : $($Data.FileCount)"
+        "Folders       : $($Data.FolderCount)"
+        "Original size : $(Format-A4950Bytes $Data.TotalBytes)"
+        "Zipped size   : $(Format-A4950Bytes $Data.CompressedBytes)"
+    ) -join "`r`n"
+    [System.Windows.MessageBox]::Show($window, $lines, 'Transfer complete', 'OK', 'Information') | Out-Null
 }
 
 function Remove-LocalCopies {
@@ -1387,6 +1589,7 @@ $integrity
     $ctrl.StatusLine.Text = "Capturing $name ($($tn.Kind)) ..."
     Show-ProgressWindow -Name $name          # popup with live events
     Add-LogLine "Capture started for $name ($($tn.Kind))." 'STEP'
+    Play-A4950StartSound
 }
 
 function Stop-Capture {
@@ -1482,8 +1685,8 @@ $pumpTimer.Add_Tick({
             'done' {
                 if ($m.Error) { Add-LogLine "Job ended with error: $($m.Error)" 'ERROR'; $endText = "Error: $($m.Error)" }
                 elseif ($m.Cancelled) { Add-LogLine "Cancelled: $($m.Ok) file(s) transferred before stopping; temp cleaned up." 'WARN'; $ctrl.LblXfer.Text = "Cancelled ($($m.Ok) transferred)"; $endText = "Cancelled - $($m.Ok) file(s) transferred" }
-                elseif ($m.Fail) { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'WARN'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950ErrorSound }
-                else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound }
+                elseif ($m.Fail) { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'WARN'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950ErrorSound; Show-A4950CompletionMessage -Data $m -Outcome $endText }
+                else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound; Show-A4950CompletionMessage -Data $m -Outcome $endText }
                 if ($m.Destination -and $m.Files -and @($m.Files).Count -gt 0) {
                     Add-LogLine "Destination: $($m.Destination)" 'STEP'
                     foreach ($fn in @($m.Files)) { Add-LogLine "  -> $fn" 'OK' }
@@ -1670,12 +1873,12 @@ COMBINED ARCHIVE
   collides.
 
 TRANSFER ORDER
-  Set in Options under "Archive volume transfer" (only matters when split):
-    - "Transfer all files once completed" (default, safest): 7-Zip is a
-      black box while running, so every volume is picked up for transfer
-      together, only once the whole process has exited and every volume is
-      confirmed complete.
-    - "Transfer files instantly": each volume is picked up for transfer the
+  Set in Options under "ARCHIVE VOLUME TRANSFER" (only matters when split):
+    - "Wait for All Files" (default, safest): 7-Zip is a black box while
+      running, so every volume is picked up for transfer together, only
+      once the whole process has exited and every volume is confirmed
+      complete.
+    - "Transfer Immediately": each volume is picked up for transfer the
       moment 7-Zip finishes writing it - not once the whole archive is done.
   EITHER way, EXCEPT .001: it's always held back and sent only once every
   other volume has already been queued - even in Instant mode, since 7-Zip
@@ -1731,6 +1934,29 @@ HIDE OPTIONS
   the Activity Log more room; click "Show Options" to bring it back. Your
   settings are unaffected either way - it only changes what's on screen.
 
+NOTIFICATION SOUNDS
+  Set in Options under "SOUNDS": pick a .wav file for the start, finish and
+  error events, or leave any of them blank to use a standard Windows sound
+  instead (Beep on start, Asterisk on finish, Hand/Critical Stop on error).
+  If a configured .wav can't be played (missing, moved, unsupported format),
+  the standard Windows sound plays instead for that event and a warning is
+  logged.
+
+TRANSFER LOG & COMPLETION SUMMARY
+  Every completed job's Activity Log, worker log and TRANSFER.log now record
+  the start time, finish time, number of files, number of folders, the
+  original (uncompressed) total size and the compressed ("zipped") size that
+  was actually written to the destination. When a job finishes (success or
+  partial failure), an on-screen summary also pops up showing the Source and
+  Destination locations alongside all of the above.
+
+APPEARANCE
+  Set in Options under "APPEARANCE":
+    - "Text size": Small / Medium / Large / Extra Large - scales all text in
+      the app immediately, no restart or Save Options needed.
+    - "Dark Mode": on by default; untick for a light theme. Also applies
+      immediately.
+
 See README.md and docs\USER_GUIDE.md for full documentation.
 "@
     [System.Windows.MessageBox]::Show($msg, 'Help', 'OK', 'Information') | Out-Null
@@ -1769,6 +1995,11 @@ $ctrl.BtnSaveOptions.Add_Click({ Save-Options })
 $ctrl.BtnBrowseNet.Add_Click({ $p = Select-Folder 'Select the destination folder (UNC share or local path)' $ctrl.OptNet.Text; if ($p) { $ctrl.OptNet.Text = $p } })
 $ctrl.BtnBrowseStage.Add_Click({ $p = Select-Folder 'Select the local staging folder' (Expand-A4950Path $ctrl.OptStage.Text); if ($p) { $ctrl.OptStage.Text = $p } })
 $ctrl.BtnBrowse7z.Add_Click({ $p = Select-SevenZipFile; if ($p) { $ctrl.Opt7z.Text = $p } })
+$ctrl.BtnBrowseSoundStart.Add_Click({ $p = Select-WavFile -Title 'Select start sound (.wav)'; if ($p) { $ctrl.OptSoundStart.Text = $p } })
+$ctrl.BtnBrowseSoundFinish.Add_Click({ $p = Select-WavFile -Title 'Select finish sound (.wav)'; if ($p) { $ctrl.OptSoundFinish.Text = $p } })
+$ctrl.BtnBrowseSoundError.Add_Click({ $p = Select-WavFile -Title 'Select error sound (.wav)'; if ($p) { $ctrl.OptSoundError.Text = $p } })
+$ctrl.OptDarkMode.Add_Click({ Set-A4950Theme -Dark ([bool]$ctrl.OptDarkMode.IsChecked) })
+$ctrl.OptFontSize.Add_SelectionChanged({ if ($ctrl.OptFontSize.SelectedItem) { Set-A4950FontScale -Size $ctrl.OptFontSize.SelectedItem.Tag } })
 $ctrl.OptLevel.Add_ValueChanged({ $ctrl.OptLevelLbl.Text = "Compression level: $([int]$ctrl.OptLevel.Value)" })
 $ctrl.OptFormat.Add_SelectionChanged({ if ($ctrl.OptFormat.SelectedItem) { $config.ArchiveFormat = $ctrl.OptFormat.SelectedItem.Content; Update-NamePreview } })
 $ctrl.TxtCase.Add_TextChanged({
@@ -1793,6 +2024,8 @@ $window.Add_Loaded({
     $ctrl.LblVersion.Text = "v$script:AppVersion"
     $window.Title = "Auto 49/50 v$script:AppVersion - USB Compression & Transfer Tool"
     Set-OptionsFromConfig
+    Set-A4950Theme -Dark ([bool]$config.DarkMode)
+    Set-A4950FontScale -Size ([string]$config.FontSize)
     Update-DriveList
     Update-SelectionCount
     Update-Footer

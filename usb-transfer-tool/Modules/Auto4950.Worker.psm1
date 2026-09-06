@@ -55,6 +55,7 @@ function Invoke-A4950TransferJob {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Shared)
 
+    $jobStart   = Get-Date
     $cfg        = $Shared.Config
     $case       = $Shared.CaseNumber
     $caseSafe   = New-A4950CaseFolderName -CaseNumber $case
@@ -188,6 +189,13 @@ function Invoke-A4950TransferJob {
             if (Test-Path -LiteralPath $it) { $existingItems += $it }
             else { Write-A4950WorkerLog $Shared "SKIP (missing): $it" 'WARN' }
         }
+
+        # Counted independently of hashing/manifest generation, so these are
+        # available even when EmbedManifest is off (e.g. Quick Transfer).
+        $stats = if ($existingItems.Count -gt 0) { Get-A4950SelectionStats -SourcePath $existingItems }
+                 else { [pscustomobject]@{ FileCount = 0; FolderCount = 0; TotalBytes = 0L } }
+        Write-A4950WorkerLog $Shared "Selection  : $($stats.FileCount) file(s), $($stats.FolderCount) folder(s), $(Format-A4950Bytes $stats.TotalBytes)" 'INFO'
+
         if (-not $Shared.Cancel -and $existingItems.Count -gt 0) {
           try {
             Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage = 'item'; Current = 1; Total = 1; Name = "$($existingItems.Count) combined item(s)" }
@@ -308,6 +316,15 @@ function Invoke-A4950TransferJob {
         $ok      = $done.Count
         $fail    = @($records | Where-Object { -not $_.Transferred }).Count
         $cancelled = [bool]$Shared.Cancel
+        $jobFinish = Get-Date
+        # Sum of every archive part actually produced (successful or not) -
+        # the real "zipped size" written to disk, independent of whether every
+        # part went on to transfer successfully.
+        $compressedBytes = 0L
+        if ($records.Count -gt 0) {
+            $sum = ($records | Measure-Object -Property SizeBytes -Sum).Sum
+            if ($sum) { $compressedBytes = [int64]$sum }
+        }
 
         # ---------------------------------------------------------------------
         # Transfer log. On cancel/failure it is marked "FAILED TRANSFER".
@@ -318,7 +335,11 @@ function Invoke-A4950TransferJob {
             $logName  = if ($isFailed) { "${uniqueBase}_FAILED_TRANSFER.log" } else { "${uniqueBase}_TRANSFER.log" }
             $logPath  = Join-Path $staging $logName
             try {
-                Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed | Out-Null
+                Write-A4950TransferLog -LogPath $logPath -Records $done -Reference $case -Failed:$isFailed `
+                    -Source ($existingItems -join '; ') -Destination $destFolder `
+                    -StartTime $jobStart -FinishTime $jobFinish `
+                    -FileCount $stats.FileCount -FolderCount $stats.FolderCount `
+                    -TotalBytes $stats.TotalBytes -CompressedBytes $compressedBytes | Out-Null
                 # Copy the log to the destination (no cancel check - always send it).
                 $lt = Copy-A4950ToShare -SourceFile $logPath -DestinationFolder $destFolder -TimeStamp $Shared.Stamp
                 if ($lt.Success) {
@@ -327,6 +348,17 @@ function Invoke-A4950TransferJob {
                 }
             } catch { Write-A4950WorkerLog $Shared "Could not write/send transfer log: $($_.Exception.Message)" 'ERROR' }
         }
+
+        # ---------------------------------------------------------------------
+        # Summary: start/finish time, duration, files/folders, original vs
+        # compressed size - logged for every job regardless of outcome.
+        # ---------------------------------------------------------------------
+        $durSpan = $jobFinish - $jobStart
+        $durText = if ($durSpan.TotalHours -ge 1) { $durSpan.ToString('h\h\ mm\m\ ss\s') } else { $durSpan.ToString('mm\m\ ss\s') }
+        Write-A4950WorkerLog $Shared "Started    : $($jobStart.ToString('yyyy-MM-dd HH:mm:ss'))" 'INFO'
+        Write-A4950WorkerLog $Shared "Finished   : $($jobFinish.ToString('yyyy-MM-dd HH:mm:ss'))  (took $durText)" 'INFO'
+        Write-A4950WorkerLog $Shared "Files      : $($stats.FileCount) file(s), $($stats.FolderCount) folder(s)" 'INFO'
+        Write-A4950WorkerLog $Shared "Size       : $(Format-A4950Bytes $stats.TotalBytes) original -> $(Format-A4950Bytes $compressedBytes) compressed" 'INFO'
 
         # ---------------------------------------------------------------------
         # Cleanup staging: always on cancel (an aborted job's partial output
@@ -357,11 +389,19 @@ function Invoke-A4950TransferJob {
         # volume(s)/single archive plus the transfer log copied alongside it.
         $filesForGui = @($done | ForEach-Object { $_.Name })
         if ($logFileName) { $filesForGui += $logFileName }
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui; Files = $filesForGui }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{
+            Ok = $ok; Fail = $fail; Cancelled = $cancelled; Destination = $destFolder; Staging = $stagingForGui; Files = $filesForGui
+            Source = ($existingItems -join '; '); Started = $jobStart; Finished = $jobFinish
+            FileCount = $stats.FileCount; FolderCount = $stats.FolderCount
+            TotalBytes = $stats.TotalBytes; CompressedBytes = $compressedBytes
+        }
     }
     catch {
         Write-A4950WorkerLog $Shared "FATAL: $($_.Exception.Message)" 'ERROR'
-        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ Ok = 0; Fail = 1; Error = $_.Exception.Message }
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{
+            Ok = 0; Fail = 1; Error = $_.Exception.Message
+            Started = $jobStart; Finished = (Get-Date)
+        }
     }
     finally {
         $Shared.Running = $false

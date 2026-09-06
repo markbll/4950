@@ -14,5 +14,10 @@
   "VerifyAfterTransfer": true,
   "StagingFolder": "C:\\temp",
   "SlowMachineMode": false,
-  "ExcludePatterns": ["System Volume Information", "$RECYCLE.BIN", "Thumbs.db"]
+  "ExcludePatterns": ["System Volume Information", "$RECYCLE.BIN", "Thumbs.db"],
+  "SoundStartPath": "",
+  "SoundFinishPath": "",
+  "SoundErrorPath": "",
+  "FontSize": "Medium",
+  "DarkMode": true
 }

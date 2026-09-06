@@ -20,7 +20,7 @@ optional pass number.
 | Choose folders/files | Built entirely from standard Windows dialogs - **Browse Folders...** (folder browser, looped so several folders can be added in one flow; each captured recursively, in full) and **Add Files...** (multi-select file picker) - no in-app tree to navigate. Each item gets its own **Remove**; **Clear Selection** empties the list |
 | Source drive list | The "Source drive" dropdown lists **every** drive letter Windows has (fixed, removable, network, CD/DVD, RAM disk) - not just removable media - with a `Get-PSDrive` fallback if WMI is unavailable. Picking a drive from this dropdown by hand opens a folder browser rooted at that drive so you can pick a folder/sub-folder straight from it. With "Select all folders/files by default" on, plugging in a drive adds the whole drive to the selection automatically |
 | Confirmation detail | Confirm dialog shows the **full source path** of each item, the destination folder and the zip names |
-| Completion summary | When a job finishes, the destination path and the name of every file written there (archive/volumes + transfer log) are logged to the Activity Log and the "Transfer finished" popup |
+| Completion summary | When a job finishes, an on-screen message shows the Source and Destination locations, start/finish time, number of files/folders and original vs. compressed size — in addition to the destination path and file names logged to the Activity Log and the "Transfer finished" popup |
 | Slow Machine Mode | Header button for old/low-spec hardware: turns off the System Monitor's CPU/Memory/Network/Temp polling and forces single-threaded, store-only (no compression math) 7-Zip — trades speed for the smallest possible CPU/RAM footprint. Hashing, manifest and verification are unaffected |
 | Transfer popup | A "Transfer in progress" window opens on start, mirroring the live events + progress |
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
@@ -34,7 +34,7 @@ optional pass number.
 | SHA-256 + MD5 of originals | Per-file manifest (`.txt` + `.csv`), **embedded in the archive** |
 | Transfer to a destination | UNC share or local folder; robocopy (**restartable mode, `/Z`** — resumes from the last checkpoint instead of re-copying after a dropped connection) with Copy-Item fallback |
 | Combined single archive | All selected folders/files are always packed into ONE archive (not configurable) — one manifest covers everything, entries prefixed by each item's own top-level folder name |
-| Archive volume transfer mode | Options choice for a split archive: **Transfer all files once completed** (default, safest — waits for the whole archive) or **Transfer files instantly** (each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest). Quick Transfer always turns this on. Un-split archives are unaffected either way — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
+| Archive volume transfer mode | Options choice for a split archive, under the **ARCHIVE VOLUME TRANSFER** heading: **Wait for All Files** (default, safest — waits for the whole archive) or **Transfer Immediately** (each volume transfers the moment 7-Zip finishes writing it, rather than waiting for the rest). Quick Transfer always turns this on. Un-split archives are unaffected either way — see [Split archives are always native 7z](#split-archives-are-always-native-7z) below |
 | `.001` always transfers last | Whichever volume is named `.001` is deliberately held back and sent only once every other volume has already been queued — true in both transfer modes, since 7-Zip itself only finalises `.001` at the very end of the run regardless. Since nothing can be reassembled/opened at the destination without `.001`, this means an incomplete set can't be mistaken for a finished one |
 | Live transfer status | Per-file transfer status + running count on screen |
 | Instant cancel + cleanup | Cancel kills 7-Zip/robocopy in ~150 ms and deletes temp files |
@@ -45,7 +45,9 @@ optional pass number.
 | Collapsible Options | "Hide Options" in the header collapses the Options panel, giving the Activity Log more room |
 | Real-time events/log | Colour-coded activity log (auto-scrolls) with hashes, file names, dates/times; per-case `.log` file |
 | Post-transfer verification | Re-hash the archive at the destination (SHA-256 match) |
-| Notification sounds | An audible chime on a clean finish, and an alert sound on any error — Windows system sounds, respecting your OS volume/mute |
+| Notification sounds | A sound plays on start, on a clean finish, and on any error. Pick your own `.wav` per event in Options → **SOUNDS**, or leave any of them blank to fall back to a standard Windows sound (Beep / Asterisk / Hand), respecting your OS volume/mute |
+| Enhanced log & transfer-log detail | Start time, finish time, number of files, number of folders, and total (original) vs. compressed ("zipped") size are recorded in the Activity Log, the worker log and the `TRANSFER.log` sent to the destination |
+| Text size & Dark Mode | Options → **APPEARANCE**: choose Small / Medium / Large / Extra Large text size, and toggle Dark Mode on/off — both apply immediately, no restart needed |
 
 ---
 
@@ -165,13 +167,13 @@ C:\Destination\
 > (`VolumeSizeMB = 0`) — 7-Zip's normal `zip` creation there is completely
 > standard and opens with any zip utility.
 >
-> **Archive volume transfer mode** (Options → "Archive volume transfer",
+> **Archive volume transfer mode** (Options → "ARCHIVE VOLUME TRANSFER",
 > only relevant when split) controls *when* each volume is picked up for
 > transfer:
-> - **Transfer all files once completed** (default): 7-Zip is a black box
+> - **Wait for All Files** (default): 7-Zip is a black box
 >   while running, so every volume is picked up for transfer together, only
 >   once the whole process has exited and every volume is confirmed complete.
-> - **Transfer files instantly**: each volume is picked up for transfer the
+> - **Transfer Immediately**: each volume is picked up for transfer the
 >   moment 7-Zip finishes writing it, well before the rest of the archive is
 >   done. Verified against real 7-Zip 23.01: 7-Zip writes each volume to a
 >   `.tmp` file and only renames it to its final name once that volume's
@@ -269,6 +271,12 @@ See `config.example.json`. Key settings:
   is still cleaned up automatically, since it has no evidentiary value).
 - **Password** — optional AES-256 archive password (prefer setting per-session
   in the Options panel rather than storing in plain text).
+- **SoundStartPath / SoundFinishPath / SoundErrorPath** — optional path to a
+  `.wav` file played on that event; blank uses the standard Windows sound
+  (Beep / Asterisk / Hand) instead.
+- **FontSize** — `Small`, `Medium` (default), `Large` or `ExtraLarge` — scales
+  all text in the app.
+- **DarkMode** — `true` (default) for the dark theme, `false` for light.
 
 ### Staging space guide
 

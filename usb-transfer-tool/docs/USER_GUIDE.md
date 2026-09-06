@@ -109,19 +109,26 @@ UI.
 ### Options panel (all settings, on the main screen)
 Everything is editable on the right-hand **Options** panel — destination,
 7-Zip path, staging folder, case prefix, **archive format**, **volume/split
-size (sizing)**, **archive volume transfer mode**, compression level,
-password, hashing, manifest embedding, verification, prompt-on-insert,
-select-all default and exclude patterns. Changes apply immediately when you
-press **Start**; **Save Options** writes them to `config.json` and then hides
-the Options panel. Every checkbox can be ticked *and* un-ticked.
+size (sizing)**, the **ARCHIVE VOLUME TRANSFER** heading (transfer mode),
+compression level, password, hashing, manifest embedding, verification,
+prompt-on-insert, select-all default and exclude patterns, plus two further
+sections lower down the panel:
+- **SOUNDS** — pick a `.wav` file to play on start, finish and error, or
+  leave any of them blank for the standard Windows sound instead.
+- **APPEARANCE** — text size (Small/Medium/Large/Extra Large) and Dark Mode.
+
+Changes apply immediately when you press **Start** (Appearance changes apply
+the instant you make them, no Start needed); **Save Options** writes
+everything to `config.json` and then hides the Options panel. Every checkbox
+can be ticked *and* un-ticked.
 
 **Combined archive** — every folder/file you select is always packed into a
 **single** archive (this is fixed behavior, not a setting): one shared
 manifest lists every file, prefixed with its original top-level folder name so
-nothing collides. With the default transfer mode, nothing transfers until
-that one compression pass finishes; with **Transfer files instantly** (see
-below), a split archive's volumes can start transferring well before
-compression is done.
+nothing collides. With the default transfer mode ("Wait for All Files"),
+nothing transfers until that one compression pass finishes; with **Transfer
+Immediately** (see below), a split archive's volumes can start transferring
+well before compression is done.
 
 **Destination naming** — files land **directly in the destination**, with no
 per-case sub-folder (this is fixed behavior, not a setting). Uniqueness comes
@@ -151,6 +158,18 @@ When a job finishes, the Activity Log (and the "Transfer finished" popup)
 lists the **destination** path and the **name of every file** written there
 — the archive (or each of its volumes) plus the transfer log — so you can
 see exactly what landed where without opening the destination folder.
+
+In addition, an **on-screen message box** pops up as soon as the job
+finishes (success or partial failure), showing:
+- **Source** and **Destination** locations
+- **Started** and **Finished** timestamps
+- **Files** and **Folders** counts
+- **Original size** (uncompressed) and **Zipped size** (what was actually
+  written to the destination)
+
+The same start/finish time, file/folder counts and original-vs-zipped sizes
+are also recorded in the Activity Log, the per-case worker log and the
+`TRANSFER.log` copied to the destination — see § 4.
 
 ---
 
@@ -254,11 +273,25 @@ started — is already running; the queue takes turns, it doesn't run jobs
 concurrently.
 
 ### Notification sounds
-The tool plays the Windows **Critical Stop** sound the moment any error is
-logged (compress/transfer/verify failures, etc.), and the Windows
-**Asterisk** (information) sound once a job finishes with everything
-confirmed. Both use your system's default sound scheme, so they follow your
-Windows volume/mute settings automatically.
+A sound plays on **start**, on a clean **finish**, and the moment any
+**error** is logged (compress/transfer/verify failures, etc.). Pick your own
+`.wav` file for each event in Options → **SOUNDS**; leave any of them blank
+to fall back to a standard Windows sound instead — **Beep** on start,
+**Asterisk** on finish, **Hand** (Critical Stop) on error — which follows
+your system's default sound scheme and Windows volume/mute settings
+automatically. If a configured `.wav` can't be played (moved, deleted,
+unsupported format), the tool falls back to the standard sound for that
+event and logs a warning — it never fails the job over a missing sound file.
+
+### Appearance
+Options → **APPEARANCE**, at the bottom of the panel:
+- **Text size** — `Small`, `Medium` (default), `Large` or `Extra Large`.
+  Scales all text across the app and applies the instant you pick it.
+- **Dark Mode** — on by default; untick for a light theme. Also applies
+  immediately, with no need to press **Save Options** or restart.
+
+Both settings persist to `config.json` via **Save Options**, same as every
+other setting on the panel.
 
 ---
 
@@ -320,16 +353,16 @@ delivery. If that's a hard requirement for some recipients, keep archives
 **un-split** (`VolumeSizeMB = 0`); 7-Zip's normal `zip` creation there is
 unaffected and opens with any zip utility.
 
-**When each volume actually transfers is controlled by "Archive volume
-transfer" in Options** (only relevant when split):
+**When each volume actually transfers is controlled by the "ARCHIVE VOLUME
+TRANSFER" setting in Options** (only relevant when split):
 
-- **Transfer all files once completed** (default, safest) — 7-Zip is a
+- **Wait for All Files** (default, safest) — 7-Zip is a
   separate process, and it does **not** necessarily finish writing its
   volumes in ascending numeric order internally (the first volume file can,
   in some cases, be the *last* one it actually finishes) — so no volume is
   picked up for transfer early; all of them are only reported once the whole
   7-Zip process has exited and every volume is confirmed complete.
-- **Transfer files instantly** — each volume is picked up for transfer the
+- **Transfer Immediately** — each volume is picked up for transfer the
   moment 7-Zip finishes writing it, rather than waiting for the rest.
   Verified against real 7-Zip 23.01: 7-Zip writes each volume to a temporary
   file and only renames it to its final name once that volume's content is
@@ -363,7 +396,7 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Case prefix | Required prefix for case numbers (`CMS-A`) |
 | Archive format | `zip` (default, portable) or `7z` (smaller) |
 | Split into volumes (MB) | Max size per file; default **2048** (2 GB); `0` = single file |
-| Archive volume transfer | "Transfer all files once completed" (default) or "Transfer files instantly"; only relevant when split - see § 4 |
+| Archive volume transfer | "Wait for All Files" (default) or "Transfer Immediately"; only relevant when split - see § 4 |
 | Compression level | 0 (store) … 9 (ultra) |
 | Archive password | Optional AES-256 (encrypts headers too on `7z`) |
 | Hash SHA-256 / MD5 | Which hashes to compute |
@@ -372,6 +405,9 @@ re-run `Setup.ps1`). All values persist to `config.json`.
 | Select all by default | On USB insert, add the whole drive to the selection automatically |
 | Verify after transfer | Re-hash the archive at the destination |
 | Exclude patterns | Names to skip when compressing (e.g. `System Volume Information`) |
+| Start / Finish / Error sound | Optional `.wav` per event; blank = standard Windows sound |
+| Text size | Small / Medium (default) / Large / Extra Large |
+| Dark Mode | On (default) for the dark theme, off for light |
 
 Local copies are always kept in the staging folder (no setting for this) -
 see "Temp cleanup" above for how to remove them.

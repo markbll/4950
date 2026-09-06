@@ -48,6 +48,13 @@ function Get-DefaultConfig {
         VerifyAfterTransfer = $true                    # Re-hash the archive at destination
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
         SlowMachineMode     = $false                   # Low CPU/RAM/GPU mode: no system monitor, single-threaded compression
+        # --- Sounds --------------------------------------------------------------
+        SoundStartPath      = ''                       # Optional .wav played when a job starts (blank = a plain beep)
+        SoundFinishPath     = ''                       # Optional .wav played when a job finishes (blank = Windows Asterisk)
+        SoundErrorPath      = ''                       # Optional .wav played on error (blank = Windows Hand/Critical Stop)
+        # --- Appearance ----------------------------------------------------------
+        FontSize            = 'Medium'                 # Small | Medium | Large | ExtraLarge
+        DarkMode            = $true                    # $false switches to a light theme
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
     }
@@ -746,7 +753,15 @@ function Write-A4950TransferLog {
         [Parameter(Mandatory)][string]$LogPath,
         [Parameter(Mandatory)]$Records,       # objects: Name, Sha256, SizeBytes, TransferredUtc
         [string]$Reference = '',
-        [switch]$Failed
+        [switch]$Failed,
+        [string]$Source = '',
+        [string]$Destination = '',
+        $StartTime = $null,                  # [DateTime], local time
+        $FinishTime = $null,                 # [DateTime], local time
+        [int]$FileCount = 0,                 # original (uncompressed) file count
+        [int]$FolderCount = 0,               # original folder count
+        [int64]$TotalBytes = 0,              # original (uncompressed) total size
+        [int64]$CompressedBytes = 0          # size actually written to the destination (archive/volumes)
     )
     $sb = New-Object System.Text.StringBuilder
     if ($Failed) {
@@ -758,9 +773,15 @@ function Write-A4950TransferLog {
     }
     [void]$sb.AppendLine('==========================================================')
     [void]$sb.AppendLine("Reference     : $Reference")
+    if ($Source)      { [void]$sb.AppendLine("Source        : $Source") }
+    if ($Destination) { [void]$sb.AppendLine("Destination   : $Destination") }
+    if ($StartTime)   { [void]$sb.AppendLine("Started       : $($StartTime.ToString('yyyy-MM-dd HH:mm:ss'))") }
+    if ($FinishTime)  { [void]$sb.AppendLine("Finished      : $($FinishTime.ToString('yyyy-MM-dd HH:mm:ss'))") }
     [void]$sb.AppendLine("Generated UTC : $([DateTime]::UtcNow.ToString('o'))")
     [void]$sb.AppendLine("Machine       : $env:COMPUTERNAME")
     [void]$sb.AppendLine("Operator      : $env:USERNAME")
+    [void]$sb.AppendLine("Original      : $FileCount file(s), $FolderCount folder(s), $(Format-A4950Bytes $TotalBytes)")
+    [void]$sb.AppendLine("Compressed    : $(Format-A4950Bytes $CompressedBytes)")
     [void]$sb.AppendLine("Files copied  : $(@($Records).Count)")
     [void]$sb.AppendLine('')
     foreach ($r in @($Records)) {
@@ -875,6 +896,41 @@ function Get-A4950SystemStats {
 #endregion
 
 #region ------------------------------------------------------------ Free space & compression estimate
+
+function Get-A4950SelectionStats {
+    <#
+    .SYNOPSIS Count files and folders and sum their size across the top-level selected items.
+    .DESCRIPTION
+        Runs independently of hashing/manifest generation, so file/folder counts
+        and total size are available even when EmbedManifest is off (e.g. Quick
+        Transfer) - used for the activity log summary, the transfer log header,
+        and the on-screen completion message.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$SourcePath)
+    $fileCount = 0; $folderCount = 0; $totalBytes = 0L
+    foreach ($root in $SourcePath) {
+        if (Test-Path -LiteralPath $root -PathType Container) {
+            $folderCount++   # the top-level folder itself
+            try {
+                $dirs = @(Get-ChildItem -LiteralPath $root -Recurse -Directory -Force -ErrorAction SilentlyContinue)
+                $folderCount += $dirs.Count
+            } catch {}
+            try {
+                $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction SilentlyContinue)
+                $fileCount += $files.Count
+                if ($files.Count -gt 0) {
+                    $sum = ($files | Measure-Object -Property Length -Sum).Sum
+                    if ($sum) { $totalBytes += [int64]$sum }
+                }
+            } catch {}
+        } elseif (Test-Path -LiteralPath $root) {
+            $fileCount++
+            try { $totalBytes += [int64](Get-Item -LiteralPath $root -ErrorAction Stop).Length } catch {}
+        }
+    }
+    [pscustomobject]@{ FileCount = $fileCount; FolderCount = $folderCount; TotalBytes = $totalBytes }
+}
 
 function Format-A4950Bytes {
     <#
