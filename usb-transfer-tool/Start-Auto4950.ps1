@@ -554,7 +554,10 @@ function Set-A4950Theme {
     $script:ThemeColors = $palette
     $converter = New-Object System.Windows.Media.BrushConverter
     foreach ($key in $palette.Keys) {
-        $window.Resources[$key] = New-Object System.Windows.Media.SolidColorBrush(($converter.ConvertFromString($palette[$key])).Color)
+        # ConvertFromString already returns a ready-to-use Brush (same idiom
+        # Add-RtbLine uses for Foreground) - no need to unpack .Color and
+        # reconstruct a SolidColorBrush from it.
+        $window.Resources[$key] = $converter.ConvertFromString($palette[$key])
     }
 }
 
