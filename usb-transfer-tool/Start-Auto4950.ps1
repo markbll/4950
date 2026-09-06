@@ -469,6 +469,19 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
+# WPF freezes a Freezable (e.g. SolidColorBrush) resource loaded from a
+# ResourceDictionary when it has no dynamic content, making it read-only.
+# Set-A4950Theme mutates these brushes' .Color in place, so replace each
+# with an unfrozen clone right away - before Add_Loaded/Set-A4950Theme or
+# anything else can touch them - otherwise the first theme/mutation attempt
+# throws "Cannot modify a frozen SolidColorBrush" with no dialog shown.
+foreach ($themeKey in @('WindowBg','Panel','Accent','Text','Muted','InputBg','InputBorder','LogBg','ButtonBg')) {
+    $themeBrush = $window.Resources[$themeKey]
+    if ($themeBrush -is [System.Windows.Media.SolidColorBrush] -and $themeBrush.IsFrozen) {
+        $window.Resources[$themeKey] = $themeBrush.Clone()
+    }
+}
+
 # Grab named controls.
 $ctrl = @{}
 $xaml.SelectNodes("//*[@*[local-name()='Name']]") | ForEach-Object {
@@ -2021,21 +2034,31 @@ $ctrl.TxtOp.Add_TextChanged({
 $ctrl.TxtPass.Add_TextChanged({ Update-NamePreview })
 
 $window.Add_Loaded({
-    $ctrl.LblVersion.Text = "v$script:AppVersion"
-    $window.Title = "Auto 49/50 v$script:AppVersion - USB Compression & Transfer Tool"
-    Set-OptionsFromConfig
-    Set-A4950Theme -Dark ([bool]$config.DarkMode)
-    Set-A4950FontScale -Size ([string]$config.FontSize)
-    Update-DriveList
-    Update-SelectionCount
-    Update-Footer
-    Update-NamePreview
-    Register-UsbWatcher
-    $pumpTimer.Start(); $usbTimer.Start()
-    Set-SlowMachineMode -On ([bool]$config.SlowMachineMode)   # also starts/skips statsTimer as appropriate
-    Add-LogLine "Auto 49/50 v$script:AppVersion ready." 'OK'
-    if (-not (Resolve-SevenZip -PreferredPath $config.SevenZipPath)) {
-        Add-LogLine '7-Zip not found. Install it (https://www.7-zip.org) or set the 7-Zip path in Options.' 'ERROR'
+    try {
+        $ctrl.LblVersion.Text = "v$script:AppVersion"
+        $window.Title = "Auto 49/50 v$script:AppVersion - USB Compression & Transfer Tool"
+        Set-OptionsFromConfig
+        Set-A4950Theme -Dark ([bool]$config.DarkMode)
+        Set-A4950FontScale -Size ([string]$config.FontSize)
+        Update-DriveList
+        Update-SelectionCount
+        Update-Footer
+        Update-NamePreview
+        Register-UsbWatcher
+        $pumpTimer.Start(); $usbTimer.Start()
+        Set-SlowMachineMode -On ([bool]$config.SlowMachineMode)   # also starts/skips statsTimer as appropriate
+        Add-LogLine "Auto 49/50 v$script:AppVersion ready." 'OK'
+        if (-not (Resolve-SevenZip -PreferredPath $config.SevenZipPath)) {
+            Add-LogLine '7-Zip not found. Install it (https://www.7-zip.org) or set the 7-Zip path in Options.' 'ERROR'
+        }
+    } catch {
+        # Startup failures happen before the Activity Log can be trusted to
+        # show anything (the failure could be in the log/theme plumbing
+        # itself), so surface this with a hard MessageBox rather than
+        # risking a silent crash with no visible error at all.
+        [System.Windows.MessageBox]::Show(
+            "Auto 49/50 failed to start up correctly:`n`n$($_.Exception.GetType().Name): $($_.Exception.Message)`n`n$($_.ScriptStackTrace)",
+            'Startup error', 'OK', 'Error') | Out-Null
     }
 })
 
