@@ -1677,10 +1677,11 @@ $pumpTimer.Add_Tick({
                 }
             }
             'done' {
+                $showCompletion = $false
                 if ($m.Error) { Add-LogLine "Job ended with error: $($m.Error)" 'ERROR'; $endText = "Error: $($m.Error)" }
                 elseif ($m.Cancelled) { Add-LogLine "Cancelled: $($m.Ok) file(s) transferred before stopping; temp cleaned up." 'WARN'; $ctrl.LblXfer.Text = "Cancelled ($($m.Ok) transferred)"; $endText = "Cancelled - $($m.Ok) file(s) transferred" }
-                elseif ($m.Fail) { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'WARN'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950ErrorSound; Show-A4950CompletionMessage -Data $m -Outcome $endText }
-                else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound; Show-A4950CompletionMessage -Data $m -Outcome $endText }
+                elseif ($m.Fail) { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'WARN'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950ErrorSound; $showCompletion = $true }
+                else { Add-LogLine "Job finished: $($m.Ok) transferred, $($m.Fail) failed. -> $($m.Destination)" 'OK'; $ctrl.LblXfer.Text = "Complete ($($m.Ok) transferred)"; $endText = "Complete - $($m.Ok) transferred, $($m.Fail) failed"; Play-A4950CompletedSound; $showCompletion = $true }
                 if ($m.Destination -and $m.Files -and @($m.Files).Count -gt 0) {
                     Add-LogLine "Destination: $($m.Destination)" 'STEP'
                     foreach ($fn in @($m.Files)) { Add-LogLine "  -> $fn" 'OK' }
@@ -1700,6 +1701,12 @@ $pumpTimer.Add_Tick({
                 }
                 Complete-Capture
                 if ($script:QueueRunning) { Start-NextQueuedJob }   # auto-advance to the next queued job, if any
+                # Shown last, and only for a real completion (not cancelled/hard-
+                # errored): this is a MODAL dialog that blocks this event handler
+                # until dismissed, so the queue must already be told to advance
+                # (above) before it opens - otherwise a queued run would silently
+                # stall until the operator clicks OK on this popup.
+                if ($showCompletion) { Show-A4950CompletionMessage -Data $m -Outcome $endText }
             }
         }
     }
