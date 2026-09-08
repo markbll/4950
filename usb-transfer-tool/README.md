@@ -56,36 +56,51 @@ optional pass number.
 - **7-Zip** installed — <https://www.7-zip.org>. The tool auto-detects `7z.exe`;
   otherwise set its path in the Options panel.
 - Permission to write to the configured network share.
-- A PowerShell **execution policy** that allows local scripts to run (see below).
+- A PowerShell **execution policy** that allows local scripts to run, and the
+  scripts unblocked if downloaded as a `.zip` — run `Fix-Permissions.bat`
+  once to handle both (see below).
 
 ---
 
 ## Execution policy
 
-These scripts are **unsigned**, so Windows' default policy (`Restricted` on
-client editions) will block them. You have three options:
+These scripts are **unsigned**, so Windows will block them until you clear
+one or both of the following. **Windows 11 in particular** tags every file
+extracted from a downloaded `.zip` with a "Mark of the Web" flag, which
+blocks a script even under a permissive execution policy until it's
+unblocked. You have four options:
 
-1. **Let Setup fix it (recommended).** The first time you run `Setup.ps1`, it
-   detects a restrictive policy and offers to set **`RemoteSigned` for your user
-   account** — no administrator rights needed, and it only affects you. After
-   that you can just right-click the scripts → **Run with PowerShell**.
+1. **Run `Fix-Permissions.bat` first (recommended).** Double-click it once —
+   it unblocks every script file in this folder (clearing the Mark of the
+   Web) **and** offers to set **`RemoteSigned` for your user account** — no
+   administrator rights needed, and it only affects you. After that you can
+   double-click `Setup.bat`/`Start-Auto4950.bat`, or right-click the `.ps1`
+   files → **Run with PowerShell**.
 
-2. **Set it yourself, once**, in a normal (non-admin) PowerShell window:
+2. **Let Setup fix the policy half.** The first time you run `Setup.ps1`, it
+   also detects a restrictive policy and offers the same `RemoteSigned` fix —
+   but it doesn't unblock files, so pair it with `Unblock-File` (below) if
+   you downloaded this as a `.zip`.
+
+3. **Set it yourself, once**, in a normal (non-admin) PowerShell window:
 
    ```powershell
+   Get-ChildItem -Recurse -Include *.ps1,*.psm1,*.bat | Unblock-File
    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
    ```
 
-3. **Bypass per launch** (nothing is changed permanently):
+4. **Bypass per launch** (nothing is changed permanently — this is what the
+   `.bat` launchers already do for you):
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\Setup.ps1
    powershell -ExecutionPolicy Bypass -File .\Start-Auto4950.ps1
    ```
 
-> If your organisation enforces the policy via **Group Policy**, option 1/2
-> can't override it — use option 3, or ask an administrator to allow
-> `RemoteSigned`. Setup detects this case and tells you.
+> If your organisation enforces the policy via **Group Policy**, options 1/2/3
+> can't override it — use option 4, or ask an administrator to allow
+> `RemoteSigned`. `Fix-Permissions.ps1` and `Setup.ps1` both detect this case
+> and tell you.
 
 ---
 
@@ -233,8 +248,10 @@ selected file rather than a folder.
 
 | File | Purpose |
 |---|---|
+| `Fix-Permissions.bat` | **Run this first** — double-click launcher that unblocks the scripts and offers to fix the execution policy (see [Execution policy](#execution-policy)) |
 | `Start-Auto4950.bat` | **Double-click launcher** for the tool (bypasses execution policy) |
 | `Setup.bat` | Double-click launcher for the Setup wizard |
+| `Fix-Permissions.ps1` | One-time Windows permissions fix (unblock + execution policy) |
 | `Start-Auto4950.ps1` | Main GUI application (**Auto 49/50**) |
 | `Setup.ps1` | First-run / reconfiguration wizard |
 | `Modules/Auto4950.Core.psm1` | Config, 7-Zip, hashing, transfer, stats (UI-free) |

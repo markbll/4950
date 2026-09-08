@@ -8,32 +8,39 @@ to troubleshoot.
 ## 1. Before you start
 
 1. Install **7-Zip** (<https://www.7-zip.org>).
-2. Run `Setup.ps1`:
-   - On first launch it checks PowerShell's **execution policy**. If scripts are
-     blocked it offers to set **`RemoteSigned` for your account** (no admin
-     rights). Click **Yes** once and future launches "just work".
+2. **Double-click `Fix-Permissions.bat` once.** This is especially important
+   on **Windows 11** if you downloaded the tool as a `.zip`: extracted files
+   are tagged "downloaded from the internet" (Mark of the Web), which blocks
+   them from running even under a permissive execution policy. The script
+   unblocks every `.ps1`/`.psm1`/`.bat` file here and offers to set
+   **`RemoteSigned` for your account** (no admin rights needed) — answer
+   **Y** once and every launch after that "just works". Safe to re-run any
+   time.
+3. Run `Setup.ps1` (or double-click `Setup.bat`):
    - Set the **network share** (UNC) and click **Test** — it checks the share is
      reachable *and* writable.
    - Click **Auto-detect** for 7-Zip (or browse to `7z.exe`).
    - Choose your **compression level**, **hashing** (SHA-256/MD5), and defaults.
    - **Save**. This writes `config.json`.
 
-**Execution policy.** These scripts are unsigned. If you'd rather not let Setup
-change the policy, either set it once yourself:
+**Execution policy, the manual way.** If you'd rather not run
+`Fix-Permissions.bat`, unblock the files and set the policy yourself:
 
 ```powershell
+Get-ChildItem -Recurse -Include *.ps1,*.psm1,*.bat | Unblock-File
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-or bypass it per launch (changes nothing permanently):
+or bypass it per launch (changes nothing permanently — this is what the
+`.bat` launchers already do for you):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Setup.ps1
 powershell -ExecutionPolicy Bypass -File .\Start-Auto4950.ps1
 ```
 
-If the policy is locked by **Group Policy**, use the Bypass option — Setup
-detects this and will tell you.
+If the policy is locked by **Group Policy**, use the Bypass option —
+`Fix-Permissions.ps1` and `Setup.ps1` both detect this and will tell you.
 
 ---
 
@@ -418,7 +425,7 @@ see "Temp cleanup" above for how to remove them.
 | Nothing selected | Add at least one item with **Browse Folders...** or **Add Files...**, or turn on "Select all folders/files by default" in Options. |
 | Case number rejected | It must start with `CMS-A` (or your prefix) and have an identifier. |
 | Slow compression | Lower the compression level; level 1–3 is much faster. |
-| Script won't run | Launch with `powershell -ExecutionPolicy Bypass -File …`. |
+| Script won't run | Double-click `Fix-Permissions.bat` (unblocks files + sets execution policy), or launch with `powershell -ExecutionPolicy Bypass -File …`. |
 
 ---
 
