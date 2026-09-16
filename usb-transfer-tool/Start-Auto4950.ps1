@@ -24,7 +24,7 @@ param()
 # Bootstrapping
 # ----------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.0'
+$script:AppVersion = '6.1'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -33,9 +33,14 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 
 # P/Invoke used solely to enlarge the native Windows folder/file-picker dialogs
 # (System.Windows.Forms.FolderBrowserDialog / OpenFileDialog expose no
-# Width/Height property of their own) - see Show-EnlargedDialog below.
+# Width/Height property of their own) - see Show-EnlargedDialog below. Also
+# wraps the Vista+ IFileOpenDialog COM API in FOS_PICKFOLDERS mode so several
+# folders can be multi-selected (Ctrl/Shift-click) in ONE dialog - plain
+# System.Windows.Forms.FolderBrowserDialog only ever supports a single folder
+# per pick, with no multi-select option at all - see Select-MultipleFolders.
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 namespace Auto4950 {
     [StructLayout(LayoutKind.Sequential)]
@@ -45,6 +50,104 @@ namespace Auto4950 {
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    }
+
+    [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
+    internal class FileOpenDialogRCW { }
+
+    [ComImport, Guid("d57c7288-d4ad-4768-be02-9d969532d960"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IFileOpenDialog {
+        [PreserveSig] int Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(uint fos);
+        void GetOptions(out uint pfos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName(string pszName);
+        void GetFileName(out string pszName);
+        void SetTitle(string pszTitle);
+        void SetOkButtonLabel(string pszText);
+        void SetFileNameLabel(string pszLabel);
+        void GetResult(out IShellItem ppsi);
+        void AddPlace(IShellItem psi, uint fdap);
+        void SetDefaultExtension(string pszDefaultExtension);
+        void Close(int hr);
+        void SetClientGuid(ref Guid guid);
+        void ClearClientData();
+        void SetFilter(IntPtr pFilter);
+        void GetResults(out IShellItemArray ppenum);
+        void GetSelectedItems(out IShellItemArray ppsai);
+    }
+
+    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellItem {
+        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(uint sigdnName, out IntPtr ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+
+    [ComImport, Guid("b63ea76d-1f85-456f-a19c-48159efa858b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellItemArray {
+        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppvOut);
+        void GetPropertyStore(int flags, ref Guid riid, out IntPtr ppv);
+        void GetPropertyDescriptionList(IntPtr keyType, ref Guid riid, out IntPtr ppv);
+        void GetAttributes(int dwAttribFlags, uint sfgaoMask, out uint psfgaoAttribs);
+        void GetCount(out uint pdwNumItems);
+        void GetItemAt(uint dwIndex, out IShellItem ppsi);
+        void EnumItems(out IntPtr ppenumShellItems);
+    }
+
+    public static class NativeFolderPicker {
+        const uint FOS_PICKFOLDERS      = 0x00000020;
+        const uint FOS_FORCEFILESYSTEM  = 0x00000040;
+        const uint FOS_ALLOWMULTISELECT = 0x00000200;
+        const uint SIGDN_FILESYSPATH    = 0x80058000;
+
+        // Returns the picked folder paths, or an empty array if the operator
+        // cancelled. Native Explorer-style multi-select: Ctrl/Shift-click
+        // several folders in one dialog, same as picking multiple files.
+        public static string[] PickFolders(string title, IntPtr owner) {
+            IFileOpenDialog dialog = (IFileOpenDialog)new FileOpenDialogRCW();
+            try {
+                uint options;
+                dialog.GetOptions(out options);
+                dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
+                if (!string.IsNullOrEmpty(title)) { dialog.SetTitle(title); }
+
+                int hr = dialog.Show(owner);
+                if (hr != 0) { return new string[0]; }   // cancelled, or any error
+
+                IShellItemArray items;
+                dialog.GetResults(out items);
+                uint count;
+                items.GetCount(out count);
+                List<string> result = new List<string>();
+                for (uint i = 0; i < count; i++) {
+                    IShellItem item;
+                    items.GetItemAt(i, out item);
+                    IntPtr pPath;
+                    item.GetDisplayName(SIGDN_FILESYSPATH, out pPath);
+                    if (pPath != IntPtr.Zero) {
+                        string path = Marshal.PtrToStringUni(pPath);
+                        Marshal.FreeCoTaskMem(pPath);
+                        if (!string.IsNullOrEmpty(path)) { result.Add(path); }
+                    }
+                    Marshal.ReleaseComObject(item);
+                }
+                Marshal.ReleaseComObject(items);
+                return result.ToArray();
+            } finally {
+                Marshal.ReleaseComObject(dialog);
+            }
+        }
     }
 }
 '@
@@ -284,7 +387,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
               <Button x:Name="BtnBrowseFolder" Content="Browse Folders..." Foreground="White"/>
               <Button x:Name="BtnBrowseFiles"  Content="Add Files..." Foreground="White"/>
             </StackPanel>
-            <TextBlock Text="If the drive isn't listed above, use Browse to add folders (pick one, then choose to add another; sub-folders are included automatically) or Add Files for individual files (multi-select)." Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            <TextBlock Text="If the drive isn't listed above, use Browse Folders (multi-select; sub-folders are included automatically) or Add Files for individual files (also multi-select)." Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
 
           <Grid Grid.Row="5" Margin="0,2,0,2">
@@ -970,18 +1073,15 @@ function Start-NextQueuedJob {
 }
 
 function Add-BrowsedFolder {
-    # Standard Windows folder browser dialog (one folder per pick), looped so
-    # several folders can still be added in one flow. Each picked folder is
-    # captured recursively, in full, at capture time - the same as a checked
-    # top-level folder used to be.
+    # Native multi-select folder picker - Ctrl/Shift-click several folders in
+    # ONE dialog, no repeated "add another?" prompt needed. Each picked
+    # folder is captured recursively, in full, at capture time - the same as
+    # a checked top-level folder used to be.
+    $picked = Select-MultipleFolders -Title 'Select one or more source folders (all sub-folders and files are included)'
     $added = 0
-    while ($true) {
-        $picked = Select-Folder -Description 'Select a source folder to add (all sub-folders and files are included)'
-        if (-not $picked) { break }
-        if (Add-SelectedItem -Path $picked -IsFolder $true) { $added++ }
-        else { Add-LogLine "Folder already in the selection: $picked" 'WARN' }
-        $more = [System.Windows.MessageBox]::Show('Add another folder?', 'Browse Folders', 'YesNo', 'Question')
-        if ($more -ne 'Yes') { break }
+    foreach ($p in $picked) {
+        if (Add-SelectedItem -Path $p -IsFolder $true) { $added++ }
+        else { Add-LogLine "Folder already in the selection: $p" 'WARN' }
     }
     if ($added -gt 0) { Add-LogLine "$added folder(s) added to selection." 'OK' }
 }
@@ -1118,6 +1218,21 @@ function Select-Folder {
     if ($Start -and (Test-Path -LiteralPath $Start)) { $dlg.SelectedPath = $Start }
     if ((Show-EnlargedDialog -Dialog $dlg) -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
     return $null
+}
+
+function Select-MultipleFolders {
+    <#
+    .SYNOPSIS Native Explorer-style multi-select folder picker (one dialog).
+    .DESCRIPTION
+        System.Windows.Forms.FolderBrowserDialog only ever returns a single
+        folder, with no multi-select option - so several folders previously
+        needed one dialog trip each. This wraps the Vista+ IFileOpenDialog
+        COM API in FOS_PICKFOLDERS mode instead, which supports genuine
+        Ctrl/Shift-click multi-select, same as the file picker already does.
+    #>
+    param([string]$Title = 'Select one or more folders')
+    $ownerHwnd = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+    return [Auto4950.NativeFolderPicker]::PickFolders($Title, $ownerHwnd)
 }
 
 function Select-SevenZipFile {
@@ -1776,10 +1891,11 @@ function Show-Help {
 Auto 49/50  (version $script:AppVersion) - USB Compression & Transfer Tool
 
 WORKFLOW
-  1. Build the selection using "Browse Folders..." (standard Windows folder
-     picker - pick one folder at a time, then choose "Yes" to add another;
-     each one's sub-folders and files are included automatically) and
-     "Add Files..." (multi-select file picker, for individual files). Both
+  1. Build the selection using "Browse Folders..." (native multi-select
+     folder picker - Ctrl/Shift-click several folders in one dialog, same as
+     picking files; each one's sub-folders and files are included
+     automatically) and "Add Files..." (multi-select file picker, for
+     individual files). Both
      add to the list rather than replacing it. Remove an item with its own
      "Remove" button, or clear everything with "Clear Selection". Picking a
      drive from the "Source drive" dropdown also opens a folder browser
