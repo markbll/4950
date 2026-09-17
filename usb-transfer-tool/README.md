@@ -270,9 +270,14 @@ full Options/Selection UI with a single giant card:
 4. A failed job turns the card **red** instead, with the reason; tapping
    it resets and lets the operator try again.
 
-"Exit Kiosk Mode" (top-right, small and easy to ignore by accident) closes
-the app; it becomes "Cancel Transfer" while a job is actually running, so
-a mistaken job can still be stopped without needing Task Manager.
+Kiosk mode cannot be exited from the UI — the window has no title bar or
+close button and Alt+F4 is blocked. A **"Cancel Transfer"** button appears
+(top-right) only while a job is actually running, so a mistaken job can
+still be stopped without exiting the app; stopping the kiosk itself
+requires closing it from outside the app (e.g. Task Manager). While kiosk
+mode is running, Windows AutoPlay is turned off for the signed-in user, so
+inserting a USB drive never pops an Explorer/AutoPlay window over the
+kiosk screen.
 
 **Setting it up:** in `Setup.ps1`'s **"5. Kiosk Mode"** section, click
 **Create Kiosk Mode Shortcut** to place a shortcut on the desktop, with an

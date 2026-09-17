@@ -498,10 +498,16 @@ Options panels with one giant card that fills the screen.
    try again.
 
 ### Exiting / cancelling
-The small button top-right reads **"Exit Kiosk Mode"** when idle (confirms
-before closing) and **"Cancel Transfer"** while a job is running (stops it
-immediately, the same as Cancel in the main app - kills the running
-7-Zip/robocopy process and cleans up temp files).
+Kiosk Mode has no way to exit from the UI: there is no title bar or close
+button, and Alt+F4 is blocked. A **"Cancel Transfer"** button appears
+top-right only while a job is running, and stops it immediately (the same
+as Cancel in the main app - kills the running 7-Zip/robocopy process and
+cleans up temp files); it disappears again once the card is idle. To stop
+Kiosk Mode itself, close it from outside the app (e.g. Task Manager).
+
+While Kiosk Mode is running, Windows AutoPlay is turned off for the
+signed-in user, so inserting a USB drive never pops an Explorer/AutoPlay
+window over the kiosk screen.
 
 ### What's the same as the main app
 Kiosk Mode uses the exact same background pipeline as a normal capture, so

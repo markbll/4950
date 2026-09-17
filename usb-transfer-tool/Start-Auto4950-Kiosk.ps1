@@ -21,9 +21,13 @@
          another transfer (e.g. for the next drive).
 
     A failed job turns the button red instead, with the reason; tapping it
-    resets back to ready. "Exit Kiosk Mode" (top-right, small and easy to
-    ignore by accident) closes the app; it becomes "Cancel Transfer" while a
-    job is actually running.
+    resets back to ready. There is no way to exit kiosk mode from the UI -
+    the window has no title bar/close button and Alt+F4 is blocked; a
+    "Cancel Transfer" button appears (top-right) only while a job is
+    actually running, to stop that job without closing the app. Windows
+    AutoPlay is turned off for the current user for the duration so
+    inserting a USB drive never pops an Explorer/AutoPlay window over the
+    kiosk screen.
 
 .NOTES
     Requires: Windows PowerShell 5.1 (or PowerShell 7 on Windows) and 7-Zip.
@@ -36,7 +40,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.4'
+$script:AppVersion = '6.5'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -47,6 +51,26 @@ Import-Module $coreModule   -Force
 Import-Module $workerModule -Force
 
 $config = Import-A4950Config
+
+# ----------------------------------------------------------------------------
+# Turn off Windows AutoPlay for the current user (HKCU - no admin rights
+# needed, same "no administrator rights required" approach as the rest of
+# this app) so a USB insert never pops an Explorer/AutoPlay window over the
+# kiosk screen. NoDriveTypeAutoRun 0xFF disables autorun for every drive
+# type; DisableAutoPlay mirrors the "Use AutoPlay for all media and
+# devices" setting.
+# ----------------------------------------------------------------------------
+function Disable-A4950KioskAutoPlay {
+    try {
+        $policyKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+        $handlerKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Autoplay\Handlers'
+        if (-not (Test-Path -LiteralPath $policyKey))  { New-Item -Path $policyKey  -Force | Out-Null }
+        if (-not (Test-Path -LiteralPath $handlerKey)) { New-Item -Path $handlerKey -Force | Out-Null }
+        Set-ItemProperty -LiteralPath $policyKey  -Name 'NoDriveTypeAutoRun' -Value 0xFF -Type DWord -Force
+        Set-ItemProperty -LiteralPath $handlerKey -Name 'DisableAutoPlay'    -Value 1    -Type DWord -Force
+    } catch {}
+}
+Disable-A4950KioskAutoPlay
 
 # Shared state used to talk to the background worker runspace - same shape
 # Start-Auto4950.ps1 uses, so Invoke-A4950TransferJob needs no changes at all.
@@ -100,8 +124,8 @@ function Play-KioskErrorSound {
     <Grid Grid.Row="0" Margin="24,18">
       <TextBlock Text="Auto 49/50 - Kiosk Mode" Foreground="#FF9AA0A6" FontSize="16" VerticalAlignment="Center"/>
       <TextBlock x:Name="LblVersion" Text="" Foreground="#FF5A6068" FontSize="12" VerticalAlignment="Bottom" Margin="0,0,140,2" HorizontalAlignment="Right"/>
-      <Button x:Name="BtnExit" Content="Exit Kiosk Mode" HorizontalAlignment="Right" Padding="14,8"
-              Background="#FF3A3A46" Foreground="White" BorderThickness="0" FontWeight="SemiBold" Cursor="Hand"/>
+      <Button x:Name="BtnExit" Content="Cancel Transfer" HorizontalAlignment="Right" Padding="14,8" Visibility="Collapsed"
+              Background="#FF8E2A2A" Foreground="White" BorderThickness="0" FontWeight="SemiBold" Cursor="Hand"/>
     </Grid>
 
     <Border Grid.Row="1" x:Name="MainCard" Margin="40" CornerRadius="18" Background="#FF2E7D32" Cursor="Hand">
@@ -135,7 +159,7 @@ function Set-MainCard {
 
 function Reset-MainCard {
     Set-MainCard -Bg '#FF2E7D32' -Title 'TRANSFER' -Subtitle 'Tap to begin a new transfer'
-    $ctrl.BtnExit.Content = 'Exit Kiosk Mode'
+    $ctrl.BtnExit.Visibility = 'Collapsed'
 }
 
 # ----------------------------------------------------------------------------
@@ -269,7 +293,7 @@ function Start-KioskTransfer {
     $script:WorkerHandle = $script:WorkerPs.BeginInvoke()
 
     Set-MainCard -Bg '#FFB8860B' -Title 'TRANSFERRING...' -Subtitle $name -Detail "Source: $drivePath`nPlease wait - do not remove the drive."
-    $ctrl.BtnExit.Content = 'Cancel Transfer'
+    $ctrl.BtnExit.Visibility = 'Visible'
     Play-KioskStartSound
 }
 
@@ -323,7 +347,7 @@ $pumpTimer.Add_Tick({
                         -Subtitle "$($m.Ok) file(s) sent to $($m.Destination)" -Detail ($fileNames -join "`n")
                     Play-KioskCompletedSound
                 }
-                $ctrl.BtnExit.Content = 'Exit Kiosk Mode'
+                $ctrl.BtnExit.Visibility = 'Collapsed'
             }
         }
     }
@@ -339,16 +363,15 @@ $ctrl.MainCard.Add_MouseLeftButtonUp({
     Start-KioskTransfer
 })
 $ctrl.BtnExit.Add_Click({
-    if ($script:Shared.Running) {
-        Stop-KioskTransfer
-        return
-    }
-    $confirm = [System.Windows.MessageBox]::Show('Exit Kiosk Mode?', 'Exit Kiosk Mode', 'YesNo', 'Question')
-    if ($confirm -eq 'Yes') { $window.Close() }
+    if ($script:Shared.Running) { Stop-KioskTransfer }
 })
+# Kiosk mode cannot be exited from the UI - block every close attempt
+# (Alt+F4, WM_CLOSE, etc.); the window already has no title bar/close
+# button. The process must be stopped from outside the app (e.g. Task
+# Manager) if it ever needs to come down.
 $window.Add_Closing({
-    if ($script:Shared.Running) { $script:Shared.Cancel = $true }
-    $pumpTimer.Stop()
+    param($s, $e)
+    $e.Cancel = $true
 })
 
 Reset-MainCard
