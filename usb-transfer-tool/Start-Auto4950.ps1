@@ -24,7 +24,7 @@ param()
 # Bootstrapping
 # ----------------------------------------------------------------------------
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.2'
+$script:AppVersion = '6.3'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -260,6 +260,7 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
     </Style>
   </Window.Resources>
 
+  <Grid>
   <Grid Margin="8">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -563,6 +564,12 @@ $script:QueueRunning = $false   # true once "Start Queue" is clicked, until stop
       </Grid>
     </Border>
   </Grid>
+
+  <!-- Non-blocking toast notifications (Show-A4950Toast) - stack in the
+       top-right corner, on top of everything else, never intercepting
+       clicks anywhere they aren't actually painted. -->
+  <StackPanel x:Name="ToastHost" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0" Panel.ZIndex="1000"/>
+  </Grid>
 </Window>
 "@
 
@@ -722,6 +729,92 @@ function Add-LogLine {
     # Mirror into the transfer-progress popup when it is open.
     if ($script:Prog -and $script:Prog.Log) { Add-RtbLine $script:Prog.Log $line $colour }
     if ($Level -eq 'ERROR') { Play-A4950ErrorSound }
+}
+
+# ----------------------------------------------------------------------------
+# Toast notifications - a non-blocking, self-dismissing alternative to
+# MessageBox for anything that's purely informational (not a Yes/No decision
+# the operator must make). A modal MessageBox popping up mid-queue looks
+# exactly like the app has hung, even though it isn't actually blocking
+# anything behind the scenes - a toast never has that problem, since nothing
+# is waiting on it being dismissed.
+# ----------------------------------------------------------------------------
+$script:ToastPalette = @{
+    Success = '#FF2E7D32'   # matches the green used elsewhere for success/Save/Start actions
+    Info    = '#FF1565C0'
+    Warning = '#FFB8860B'
+    Error   = '#FFB0281E'
+}
+
+function Show-A4950Toast {
+    <#
+    .SYNOPSIS Show a self-dismissing notification card, top-right, that never blocks the app.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [string]$Title = '',
+        [ValidateSet('Success', 'Info', 'Warning', 'Error')][string]$Level = 'Success',
+        [int]$DurationSeconds = 8
+    )
+    $bg = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($script:ToastPalette[$Level])
+
+    $card = New-Object System.Windows.Controls.Border
+    $card.Background = $bg
+    $card.CornerRadius = '6'
+    $card.Padding = '14,10'
+    $card.Margin = '0,0,0,8'
+    $card.MaxWidth = 400
+    $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
+    $shadow.BlurRadius = 14; $shadow.ShadowDepth = 2; $shadow.Opacity = 0.45
+    $card.Effect = $shadow
+
+    $dock = New-Object System.Windows.Controls.DockPanel
+    $closeBtn = New-Object System.Windows.Controls.Button
+    $closeBtn.Content = [char]0x2715   # "X"
+    $closeBtn.Background = 'Transparent'
+    $closeBtn.BorderThickness = '0'
+    $closeBtn.Foreground = 'White'
+    $closeBtn.Padding = '4,0'
+    $closeBtn.Margin = '8,0,0,0'
+    $closeBtn.VerticalAlignment = 'Top'
+    $closeBtn.Cursor = 'Hand'
+    [System.Windows.Controls.DockPanel]::SetDock($closeBtn, 'Right')
+    $dock.Children.Add($closeBtn) | Out-Null
+
+    $textStack = New-Object System.Windows.Controls.StackPanel
+    if ($Title) {
+        $titleBlock = New-Object System.Windows.Controls.TextBlock
+        $titleBlock.Text = $Title
+        $titleBlock.FontWeight = 'Bold'
+        $titleBlock.Foreground = 'White'
+        $titleBlock.Margin = '0,0,0,4'
+        $textStack.Children.Add($titleBlock) | Out-Null
+    }
+    $body = New-Object System.Windows.Controls.TextBlock
+    $body.Text = $Text
+    $body.Foreground = 'White'
+    $body.TextWrapping = 'Wrap'
+    $body.FontFamily = 'Consolas'
+    $body.FontSize = 12
+    $textStack.Children.Add($body) | Out-Null
+    $dock.Children.Add($textStack) | Out-Null
+
+    $card.Child = $dock
+    $ctrl.ToastHost.Children.Insert(0, $card)
+
+    # $timer must exist before .GetNewClosure() snapshots it below - GetNewClosure()
+    # captures each referenced variable's CURRENT value, so building the closure
+    # before $timer is assigned would bake in a null and Stop() would fail on click.
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromSeconds($DurationSeconds)
+
+    $dismiss = {
+        $timer.Stop()
+        $ctrl.ToastHost.Children.Remove($card)
+    }.GetNewClosure()
+    $closeBtn.Add_Click($dismiss)
+    $timer.Add_Tick($dismiss)
+    $timer.Start()
 }
 
 # ----------------------------------------------------------------------------
@@ -952,11 +1045,11 @@ function Add-ToQueue {
     # discovered later when the queue auto-advances unattended.
     Sync-OptionsToConfig
     $tn = Get-TransferName
-    if (-not $tn.Ok) { [System.Windows.MessageBox]::Show($tn.Reason, 'Identifier required', 'OK', 'Warning') | Out-Null; return }
+    if (-not $tn.Ok) { Show-A4950Toast -Text $tn.Reason -Title 'Identifier required' -Level Warning; return }
     $issues = Test-A4950Config -Config $config
-    if ($issues.Count) { [System.Windows.MessageBox]::Show(($issues -join "`n"), 'Configuration problems', 'OK', 'Warning') | Out-Null; return }
+    if ($issues.Count) { Show-A4950Toast -Text ($issues -join "`n") -Title 'Configuration problems' -Level Warning; return }
     $items = Get-SelectedItemPaths
-    if ($items.Count -eq 0) { [System.Windows.MessageBox]::Show('Select at least one folder or file to add to the queue.', 'Nothing selected', 'OK', 'Warning') | Out-Null; return }
+    if ($items.Count -eq 0) { Show-A4950Toast -Text 'Select at least one folder or file to add to the queue.' -Title 'Nothing selected' -Level Warning; return }
 
     $entry = [pscustomobject]@{
         Id       = [guid]::NewGuid().ToString()
@@ -1446,8 +1539,9 @@ function Show-A4950CompletionMessage {
         "Folders       : $($Data.FolderCount)"
         "Original size : $(Format-A4950Bytes $Data.TotalBytes)"
         "Zipped size   : $(Format-A4950Bytes $Data.CompressedBytes)"
-    ) -join "`r`n"
-    [System.Windows.MessageBox]::Show($window, $lines, 'Transfer complete', 'OK', 'Information') | Out-Null
+    ) -join "`n"
+    $level = if ($Data.Fail) { 'Warning' } else { 'Success' }
+    Show-A4950Toast -Text $lines -Title 'Transfer complete' -Level $level -DurationSeconds 18
 }
 
 function Remove-LocalCopies {
@@ -1474,7 +1568,7 @@ function Remove-LocalCopies {
         $script:LastJobStaging = $null
     } catch {
         Add-LogLine "Could not delete local copies: $($_.Exception.Message)" 'ERROR'
-        [System.Windows.MessageBox]::Show("Could not delete the local copies:`n$($_.Exception.Message)", 'Delete failed', 'OK', 'Error') | Out-Null
+        Show-A4950Toast -Text "Could not delete the local copies:`n$($_.Exception.Message)" -Title 'Delete failed' -Level Error
     }
 }
 
@@ -1604,20 +1698,20 @@ function Start-Capture {
 
     $tn = Get-TransferName
     if (-not $tn.Ok) {
-        [System.Windows.MessageBox]::Show($tn.Reason, 'Identifier required', 'OK', 'Warning') | Out-Null
+        Show-A4950Toast -Text $tn.Reason -Title 'Identifier required' -Level Warning
         return
     }
     $name = $tn.Name
 
     $issues = Test-A4950Config -Config $config
     if ($issues.Count) {
-        [System.Windows.MessageBox]::Show(($issues -join "`n"), 'Configuration problems', 'OK', 'Warning') | Out-Null
+        Show-A4950Toast -Text ($issues -join "`n") -Title 'Configuration problems' -Level Warning
         return
     }
 
     $items = Get-SelectedItemPaths
     if ($items.Count -eq 0) {
-        [System.Windows.MessageBox]::Show('Select at least one folder or file to capture.', 'Nothing selected', 'OK', 'Warning') | Out-Null
+        Show-A4950Toast -Text 'Select at least one folder or file to capture.' -Title 'Nothing selected' -Level Warning
         return
     }
 
@@ -2061,8 +2155,10 @@ TRANSFER LOG & COMPLETION SUMMARY
   the start time, finish time, number of files, number of folders, the
   original (uncompressed) total size and the compressed ("zipped") size that
   was actually written to the destination. When a job finishes (success or
-  partial failure), an on-screen summary also pops up showing the Source and
-  Destination locations alongside all of the above.
+  partial failure), a notification also appears in the top-right corner
+  showing the Source and Destination locations alongside all of the above -
+  it fades on its own after a while, or dismiss it early with its X, and it
+  never blocks the app or the job queue while it's showing.
 
 APPEARANCE
   Set in Options under "APPEARANCE":

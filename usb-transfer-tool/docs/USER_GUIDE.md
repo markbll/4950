@@ -165,13 +165,25 @@ lists the **destination** path and the **name of every file** written there
 — the archive (or each of its volumes) plus the transfer log — so you can
 see exactly what landed where without opening the destination folder.
 
-In addition, an **on-screen message box** pops up as soon as the job
-finishes (success or partial failure), showing:
+In addition, a **notification** appears in the top-right corner as soon as
+the job finishes (success or partial failure), showing:
 - **Source** and **Destination** locations
 - **Started** and **Finished** timestamps
 - **Files** and **Folders** counts
 - **Original size** (uncompressed) and **Zipped size** (what was actually
   written to the destination)
+
+This is a self-dismissing notification, not a dialog you have to click
+through — it fades on its own after a while, or you can close it early with
+its **X**. Nothing waits on it: during an unattended **Job Queue** run, the
+next queued job keeps starting on schedule whether or not you've seen or
+dismissed this notification yet, so the app never looks like it has
+stopped mid-queue. Green means a clean finish; amber means some files
+failed. The same styling is used for every other purely-informational
+message in the app (validation warnings, a failed delete, etc.) — only
+genuine Yes/No decisions (Confirm capture, Delete Local Copies, Quick
+Transfer's integrity warning) still use an ordinary dialog, since those
+really do need you to choose before the app continues.
 
 The same start/finish time, file/folder counts and original-vs-zipped sizes
 are also recorded in the Activity Log, the per-case worker log and the
