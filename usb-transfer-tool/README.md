@@ -27,6 +27,7 @@ optional pass number.
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
 | Job queue | **Add to Queue** snapshots the current selection, identifiers and Options into a queue entry, then clears the screen to build the next one. **Start Queue** runs queued jobs one after another automatically. Each entry has its own **Edit** (recall it onto the screen to change anything) and **Remove** (cancel it outright); **Stop Queue** halts auto-advance without touching whatever job is currently running |
+| Kiosk Mode | A separate, full-screen, one-button front end (`Start-Auto4950-Kiosk.ps1`) for unattended intake — asks only for the CMS case, pass number and an external source drive, then transfers the whole drive. The card turns blue and shows "COMPLETED" with the file name(s) sent; `Setup.ps1` can create its desktop shortcut (and an auto-start-at-sign-in option) — see [Kiosk Mode](#kiosk-mode) below |
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
 | Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
@@ -245,6 +246,42 @@ selected file rather than a folder.
 
 ---
 
+## Kiosk Mode
+
+A simplified, full-screen, one-button front end for unattended intake
+stations — `Start-Auto4950-Kiosk.ps1` (or its `.bat` launcher). It uses the
+same `config.json` as the main app (destination, compression, hashing,
+sounds — set these up first with `Setup.ps1` or the main app's Options
+panel) and the exact same compress/hash/transfer pipeline, but replaces the
+full Options/Selection UI with a single giant card:
+
+1. **Tap the card.** A small dialog asks for the **CMS case number**, the
+   **pass number**, and the **source drive** — only genuinely
+   external/removable drives are listed (fixed/internal drives never
+   appear, so a kiosk operator can't accidentally point a job at the
+   system drive).
+2. The **entire selected drive** is captured, hashed, compressed and
+   transferred — the same as adding that drive's root as a folder in the
+   main app with "Select all folders/files by default" on. No folder/file
+   picking, no Options panel.
+3. The card turns **blue** and reads **"COMPLETED"** with the file name(s)
+   that were sent, once the job finishes. Tap it again to start the next
+   drive's transfer.
+4. A failed job turns the card **red** instead, with the reason; tapping
+   it resets and lets the operator try again.
+
+"Exit Kiosk Mode" (top-right, small and easy to ignore by accident) closes
+the app; it becomes "Cancel Transfer" while a job is actually running, so
+a mistaken job can still be stopped without needing Task Manager.
+
+**Setting it up:** in `Setup.ps1`'s **"5. Kiosk Mode"** section, click
+**Create Kiosk Mode Shortcut** to place a shortcut on the desktop, with an
+optional checkbox to also launch it automatically at sign-in (per-user
+Startup folder — no administrator rights needed) for a PC that's dedicated
+to intake.
+
+---
+
 ## Files
 
 | File | Purpose |
@@ -252,9 +289,11 @@ selected file rather than a folder.
 | `Fix-Permissions.bat` | **Run this first** — double-click launcher that unblocks the scripts and offers to fix the execution policy (see [Execution policy](#execution-policy)) |
 | `Start-Auto4950.bat` | **Double-click launcher** for the tool (bypasses execution policy) |
 | `Setup.bat` | Double-click launcher for the Setup wizard |
+| `Start-Auto4950-Kiosk.bat` | Double-click launcher for [Kiosk Mode](#kiosk-mode) |
 | `Fix-Permissions.ps1` | One-time Windows permissions fix (unblock + execution policy) |
 | `Start-Auto4950.ps1` | Main GUI application (**Auto 49/50**) |
-| `Setup.ps1` | First-run / reconfiguration wizard |
+| `Setup.ps1` | First-run / reconfiguration wizard; also creates the Kiosk Mode shortcut |
+| `Start-Auto4950-Kiosk.ps1` | One-button, full-screen [Kiosk Mode](#kiosk-mode) front end |
 | `Modules/Auto4950.Core.psm1` | Config, 7-Zip, hashing, transfer, stats (UI-free) |
 | `Modules/Auto4950.Worker.psm1` | Background compress→transfer pipeline |
 | `config.json` | Your saved settings (created by Setup) |

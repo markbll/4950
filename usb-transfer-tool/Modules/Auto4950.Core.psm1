@@ -1023,6 +1023,30 @@ function Test-A4950OpName {
     return $true
 }
 
+function Get-A4950RemovableDrives {
+    <#
+    .SYNOPSIS List only genuinely removable/external drives (WMI DriveType 2).
+    .DESCRIPTION
+        Used by Kiosk Mode, where the source must be an external drive - unlike
+        the full app's "Source drive" dropdown (which lists every drive type so
+        nothing is hidden from the operator), this deliberately excludes
+        anything that isn't confirmed removable. If WMI itself is unavailable,
+        this returns an empty list rather than guessing from Get-PSDrive (which
+        has no reliable drive-type information) - failing closed here is safer
+        than letting a kiosk operator accidentally point a job at a fixed
+        internal drive.
+    #>
+    [CmdletBinding()]
+    param()
+    try {
+        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
+            Where-Object { $_.DeviceID -and $_.DriveType -eq 2 } |
+            Sort-Object DeviceID)
+    } catch {
+        return @()
+    }
+}
+
 function Write-A4950Log {
     <#
     .SYNOPSIS Append a timestamped, levelled line to a log file.

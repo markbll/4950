@@ -451,3 +451,61 @@ see "Temp cleanup" above for how to remove them.
   together with the archive.
 - Consider signing the manifest and generating a chain-of-custody document —
   see "Recommended next steps" in the README.
+
+---
+
+## 8. Kiosk Mode
+
+`Start-Auto4950-Kiosk.ps1` (or its `Start-Auto4950-Kiosk.bat` launcher) is a
+separate, simplified front end for unattended intake stations. It shares
+`config.json` and the whole compress/hash/transfer pipeline with the main
+app — set the destination, compression, hashing, sounds etc. with `Setup.ps1`
+or the main app's Options panel **first** — but replaces the Selection and
+Options panels with one giant card that fills the screen.
+
+### Setting it up
+1. Configure and **Save** your settings in `Setup.ps1` or the main app, as
+   normal - Kiosk Mode has no Options panel of its own, so whatever's in
+   `config.json` at the time a job starts is what's used.
+2. In `Setup.ps1`, under **"5. Kiosk Mode"**, click **Create Kiosk Mode
+   Shortcut**. This places a shortcut on the desktop; tick **"Also launch
+   automatically when Windows starts"** first if this is a PC dedicated to
+   intake, to also add it to the current user's Startup folder (no
+   administrator rights needed - this only affects that one account).
+
+### Running a transfer
+1. **Tap the card** (green, reads "TRANSFER"). A small dialog asks for:
+   - **CMS Case Number** - validated the same way as the main app (must
+     start with the configured prefix and include an identifier).
+   - **Pass Number** - required in Kiosk Mode (there's no OP-name
+     alternative here, unlike the main app).
+   - **Source Drive** - a dropdown of only genuinely external/removable
+     drives currently connected. Fixed/internal drives are never listed,
+     so a job can't accidentally be pointed at the system drive. If
+     nothing is listed, connect the drive and click **Refresh**.
+2. Click **Start Transfer**. The **entire selected drive** is captured
+   recursively, hashed, compressed and transferred - the same as adding
+   that drive's root as a folder in the main app with "Select all
+   folders/files by default" on. There's no folder/file picking in Kiosk
+   Mode; it's always the whole drive.
+3. While running, the card turns amber and shows the current stage
+   (hashing / compressing / transferring). **Do not remove the drive**
+   until it finishes.
+4. On success, the card turns **blue** and reads **"COMPLETED"**, with the
+   file name(s) that were sent underneath. Tap the card again to start the
+   next drive's transfer.
+5. On failure, the card turns **red** with the reason. Tap it to reset and
+   try again.
+
+### Exiting / cancelling
+The small button top-right reads **"Exit Kiosk Mode"** when idle (confirms
+before closing) and **"Cancel Transfer"** while a job is running (stops it
+immediately, the same as Cancel in the main app - kills the running
+7-Zip/robocopy process and cleans up temp files).
+
+### What's the same as the main app
+Kiosk Mode uses the exact same background pipeline as a normal capture, so
+everything else in this guide still applies: the manifest, the per-case
+`.log` and `TRANSFER.log`, notification sounds, native 7z archives (split
+per the configured volume size), `.001` always transferring last, and local
+copies always being kept in the staging folder until manually removed.
