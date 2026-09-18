@@ -1025,23 +1025,49 @@ function Test-A4950OpName {
 
 function Get-A4950RemovableDrives {
     <#
-    .SYNOPSIS List only genuinely removable/external drives (WMI DriveType 2).
+    .SYNOPSIS List only genuinely removable/external drives.
     .DESCRIPTION
         Used by Kiosk Mode, where the source must be an external drive - unlike
         the full app's "Source drive" dropdown (which lists every drive type so
         nothing is hidden from the operator), this deliberately excludes
-        anything that isn't confirmed removable. If WMI itself is unavailable,
-        this returns an empty list rather than guessing from Get-PSDrive (which
-        has no reliable drive-type information) - failing closed here is safer
-        than letting a kiosk operator accidentally point a job at a fixed
-        internal drive.
+        anything that isn't confirmed removable/external. If WMI itself is
+        unavailable, this returns an empty list rather than guessing from
+        Get-PSDrive (which has no reliable drive-type information) - failing
+        closed here is safer than letting a kiosk operator accidentally point
+        a job at a fixed internal drive.
+
+        Combines two checks rather than just Win32_LogicalDisk.DriveType:
+        USB flash drives report DriveType 2 (Removable), but USB external
+        hard drives/SSDs almost always report DriveType 3 (Fixed) - the same
+        value as an internal drive - because DriveType reflects the media,
+        not the connection (Explorer shows them as ejectable by separately
+        detecting the USB bus, which is what this also does via
+        Win32_DiskDrive.InterfaceType). Filtering on the physical disk's
+        interface catches USB hard drives that DriveType alone would miss.
     #>
     [CmdletBinding()]
     param()
     try {
-        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
-            Where-Object { $_.DeviceID -and $_.DriveType -eq 2 } |
-            Sort-Object DeviceID)
+        $found = New-Object System.Collections.Generic.List[object]
+
+        # DriveType 2 = Removable (thumb drives, SD cards, etc.)
+        @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
+            Where-Object { $_.DeviceID -and $_.DriveType -eq 2 }) |
+            ForEach-Object { $found.Add($_) }
+
+        # Any drive letter that lives on a USB-attached physical disk, even
+        # if that disk itself reports as "Fixed" media (external HDDs/SSDs).
+        @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop |
+            Where-Object { $_.InterfaceType -eq 'USB' }) | ForEach-Object {
+                $disk = $_
+                @(Get-CimAssociatedInstance -InputObject $disk -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue) |
+                    ForEach-Object {
+                        @(Get-CimAssociatedInstance -InputObject $_ -ResultClassName Win32_LogicalDisk -ErrorAction SilentlyContinue) |
+                            Where-Object { $_.DeviceID } | ForEach-Object { $found.Add($_) }
+                    }
+            }
+
+        return @($found | Sort-Object DeviceID -Unique)
     } catch {
         return @()
     }
