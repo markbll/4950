@@ -77,7 +77,7 @@ $configPath = Get-ConfigPath
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Auto 49/50 - Setup Wizard" Height="640" Width="640"
+        Title="Auto 49/50 - Setup Wizard" Height="760" Width="640"
         WindowStartupLocation="CenterScreen" Background="#FF2A2A33" FontFamily="Segoe UI">
   <ScrollViewer VerticalScrollBarVisibility="Auto">
   <StackPanel Margin="18">
@@ -108,9 +108,7 @@ $configPath = Get-ConfigPath
       <StackPanel Grid.Column="0" Margin="0,0,8,0">
         <TextBlock Text="4. Case prefix" Foreground="#FFECECEC" FontWeight="SemiBold"/>
         <TextBox x:Name="Prefix" Padding="5" Margin="0,2,0,10" Background="#FF20202A" Foreground="#FFECECEC"/>
-        <TextBlock Text="Archive format" Foreground="#FFECECEC" FontWeight="SemiBold"/>
-        <ComboBox x:Name="Fmt" Margin="0,2,0,10"><ComboBoxItem>zip</ComboBoxItem><ComboBoxItem>7z</ComboBoxItem></ComboBox>
-        <TextBlock Text="All selected folders/files are always combined into ONE archive." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+        <TextBlock Text="All selected folders/files are always combined into ONE 7z archive." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
         <TextBlock Text="Split into volumes of (MB, 0 = single file)" Foreground="#FFECECEC" FontWeight="SemiBold"/>
         <TextBox x:Name="Volume" Padding="5" Margin="0,2,0,10" Background="#FF20202A" Foreground="#FFECECEC"/>
       </StackPanel>
@@ -126,7 +124,15 @@ $configPath = Get-ConfigPath
     <CheckBox x:Name="Embed"  Content="Embed hash manifest inside each archive" Foreground="#FFECECEC" Margin="0,6,0,2"/>
     <CheckBox x:Name="Auto"   Content="Prompt automatically when a USB drive is connected" Foreground="#FFECECEC" Margin="0,2"/>
     <CheckBox x:Name="All"    Content="Select all folders/files by default" Foreground="#FFECECEC" Margin="0,2"/>
-    <CheckBox x:Name="Verify" Content="Verify archive at destination after transfer" Foreground="#FFECECEC" Margin="0,2"/>
+
+    <Separator Margin="0,16,0,10"/>
+    <TextBlock Text="5. Kiosk Mode (optional)" Foreground="#FFECECEC" FontWeight="SemiBold"/>
+    <TextBlock Text="A simplified, full-screen, one-button front end for unattended intake stations - it asks only for the CMS case number, pass number and an external source drive, then transfers the whole drive using the settings above. Save your configuration first." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,10"/>
+    <CheckBox x:Name="KioskAutoStart" Content="Also launch automatically when Windows starts (recommended for kiosk PCs)" Foreground="#FFECECEC" Margin="0,0,0,8"/>
+    <StackPanel Orientation="Horizontal">
+      <Button x:Name="BtnKiosk" Content="Create Kiosk Mode Shortcut" Padding="12,7" Margin="0,0,8,0" Background="#FF3A3A80" Foreground="#FFECECEC"/>
+    </StackPanel>
+    <TextBlock x:Name="KioskStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
       <Button x:Name="Save"   Content="Save configuration" Padding="16,7" Margin="4" Background="#FF2E7D32" Foreground="#FFECECEC"/>
@@ -153,9 +159,7 @@ $g = { param($n) $w.FindName($n) }
 (& $g 'Embed').IsChecked  = [bool]$config.EmbedManifest
 (& $g 'Auto').IsChecked   = [bool]$config.AutoPromptOnInsert
 (& $g 'All').IsChecked    = [bool]$config.DefaultSelectAll
-(& $g 'Verify').IsChecked = [bool]$config.VerifyAfterTransfer
 (& $g 'Volume').Text = [string]([int]$config.VolumeSizeMB)
-foreach ($it in (& $g 'Fmt').Items) { if ($it.Content -eq $config.ArchiveFormat) { (& $g 'Fmt').SelectedItem = $it } }
 
 (& $g 'BtnTestNet').Add_Click({
     $path = (& $g 'Net').Text.Trim()
@@ -201,6 +205,44 @@ foreach ($it in (& $g 'Fmt').Items) { if ($it.Content -eq $config.ArchiveFormat)
     }
 })
 
+function New-A4950Shortcut {
+    <#
+    .SYNOPSIS Create a .lnk shortcut to the Kiosk Mode launcher.
+    #>
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$TargetBat, [Parameter(Mandatory)][string]$WorkDir)
+    $wsh = New-Object -ComObject WScript.Shell
+    $sc = $wsh.CreateShortcut($Path)
+    $sc.TargetPath = $TargetBat
+    $sc.WorkingDirectory = $WorkDir
+    $sc.Description = 'Auto 49/50 - Kiosk Mode'
+    $sc.Save()
+}
+
+(& $g 'BtnKiosk').Add_Click({
+    $kioskBat = Join-Path $scriptRoot 'Start-Auto4950-Kiosk.bat'
+    if (-not (Test-Path -LiteralPath $kioskBat)) {
+        (& $g 'KioskStatus').Text = 'Could not find Start-Auto4950-Kiosk.bat next to Setup.ps1.'
+        (& $g 'KioskStatus').Foreground = '#FFEF5350'
+        return
+    }
+    try {
+        $desktopPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Auto 49-50 Kiosk.lnk'
+        New-A4950Shortcut -Path $desktopPath -TargetBat $kioskBat -WorkDir $scriptRoot
+        $msg = "Desktop shortcut created: $desktopPath"
+
+        if ((& $g 'KioskAutoStart').IsChecked) {
+            $startupPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Auto 49-50 Kiosk.lnk'
+            New-A4950Shortcut -Path $startupPath -TargetBat $kioskBat -WorkDir $scriptRoot
+            $msg += "`nAlso set to launch automatically at sign-in (Startup folder, this account only)."
+        }
+        (& $g 'KioskStatus').Text = $msg
+        (& $g 'KioskStatus').Foreground = '#FF66BB6A'
+    } catch {
+        (& $g 'KioskStatus').Text = "Could not create the shortcut: $($_.Exception.Message)"
+        (& $g 'KioskStatus').Foreground = '#FFEF5350'
+    }
+})
+
 (& $g 'Cancel').Add_Click({ $w.Close() })
 (& $g 'Save').Add_Click({
     $config.NetworkShare        = (& $g 'Net').Text.Trim()
@@ -208,7 +250,6 @@ foreach ($it in (& $g 'Fmt').Items) { if ($it.Content -eq $config.ArchiveFormat)
     $config.StagingFolder       = (& $g 'Stage').Text.Trim()
     $config.CasePrefix          = (& $g 'Prefix').Text.Trim()
     $config.CompressionLevel    = [int](& $g 'Level').Value
-    $config.ArchiveFormat       = (& $g 'Fmt').SelectedItem.Content
     $vol = 0; [void][int]::TryParse((& $g 'Volume').Text.Trim(), [ref]$vol); if ($vol -lt 0) { $vol = 0 }
     $config.VolumeSizeMB        = $vol
     $algs = @(); if ((& $g 'Sha').IsChecked) { $algs += 'SHA256' }; if ((& $g 'Md5').IsChecked) { $algs += 'MD5' }
@@ -217,7 +258,6 @@ foreach ($it in (& $g 'Fmt').Items) { if ($it.Content -eq $config.ArchiveFormat)
     $config.EmbedManifest       = [bool](& $g 'Embed').IsChecked
     $config.AutoPromptOnInsert  = [bool](& $g 'Auto').IsChecked
     $config.DefaultSelectAll    = [bool](& $g 'All').IsChecked
-    $config.VerifyAfterTransfer = [bool](& $g 'Verify').IsChecked
     Save-A4950Config -Config $config -Path $configPath | Out-Null
 
     $issues = Test-A4950Config -Config $config
