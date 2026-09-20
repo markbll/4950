@@ -285,6 +285,20 @@ optional checkbox to also launch it automatically at sign-in (per-user
 Startup folder — no administrator rights needed) for a PC that's dedicated
 to intake.
 
+**Blocking a drive:** the same section has a **Blocked drives** list — click
+**Block a connected drive...** and pick from the currently-connected
+external drives to stop that specific drive from ever showing up as a
+Kiosk Mode source (e.g. a staff USB stick that should never be transferred).
+It's matched by the drive's volume serial number, so it still works if the
+drive letter changes; unblock it again with **Unblock selected**. Remember
+to click **Save configuration**.
+
+**Notification sounds:** also in that section, optional `.wav` files can be
+set for **Transfer started / completed / error** — these are the same
+sounds the main app's Options panel uses (`SoundStartPath`,
+`SoundFinishPath`, `SoundErrorPath` in `config.json`), so Kiosk Mode plays
+them too without needing to open the full app.
+
 ---
 
 ## Files
@@ -333,6 +347,9 @@ See `config.example.json`. Key settings:
 - **FontSize** — `Small`, `Medium` (default), `Large` or `ExtraLarge` — scales
   all text in the app.
 - **DarkMode** — `true` (default) for the dark theme, `false` for light.
+- **KioskBlockedDrives** — drives excluded from [Kiosk Mode](#kiosk-mode)'s
+  source list, each `{ "Serial": "<volume serial number>", "Label": "<for
+  display>" }`. Managed from Setup's **Blocked drives** list, not hand-edited.
 
 ### Staging space guide
 

@@ -12,7 +12,8 @@
 
       1. Tap the button - a small dialog asks for the CMS case number, the
          pass number, and the source drive (only genuinely external/removable
-         drives are listed - see Get-A4950RemovableDrives in Core.psm1).
+         drives are listed, minus any blocked in Setup.ps1's Kiosk Mode
+         section - see Get-A4950AvailableKioskDrives in Core.psm1).
       2. The ENTIRE selected drive is captured, hashed, compressed and
          transferred - the same as adding that drive's root as a folder in
          the main app, with "Select all folders/files by default" on.
@@ -40,7 +41,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.6'
+$script:AppVersion = '6.7'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -206,7 +207,7 @@ function Show-NewTransferDialog {
 
     function Update-DriveChoices {
         (& $dg 'CmbDrive').Items.Clear()
-        $drives = @(Get-A4950RemovableDrives)
+        $drives = @(Get-A4950AvailableKioskDrives -Config $config)
         foreach ($d in $drives) {
             $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
             [void](& $dg 'CmbDrive').Items.Add($label)
@@ -214,6 +215,8 @@ function Show-NewTransferDialog {
         if ((& $dg 'CmbDrive').Items.Count -gt 0) {
             (& $dg 'CmbDrive').SelectedIndex = 0
             (& $dg 'LblDriveHint').Text = ''
+        } elseif (@(Get-A4950RemovableDrives).Count -gt 0) {
+            (& $dg 'LblDriveHint').Text = 'The only connected external drive(s) are blocked from Kiosk Mode. See Setup.ps1 to review the block list.'
         } else {
             (& $dg 'LblDriveHint').Text = 'No external/removable drive detected. Connect one, then click Refresh.'
         }

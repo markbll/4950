@@ -472,6 +472,19 @@ Options panels with one giant card that fills the screen.
    automatically when Windows starts"** first if this is a PC dedicated to
    intake, to also add it to the current user's Startup folder (no
    administrator rights needed - this only affects that one account).
+3. Optionally, in the same section:
+   - **Blocked drives** - click **Block a connected drive...** and pick from
+     the currently-connected external drives to stop that specific drive
+     from ever appearing as a Kiosk Mode source (e.g. a staff USB stick that
+     should never be transferred). It's matched by the drive's volume
+     serial number, so blocking still applies even if the drive letter
+     later changes. Use **Unblock selected** to remove one.
+   - **Notification sounds** - optional `.wav` files for **Transfer
+     started / completed / error**. These are the same sounds as the main
+     app's Options panel (they're shared, not Kiosk-only), so setting them
+     here is enough even if Kiosk Mode is the only thing ever run on this
+     PC.
+   Click **Save configuration** afterwards.
 
 ### Running a transfer
 1. **Tap the card** (green, reads "TRANSFER"). A small dialog asks for:
@@ -480,9 +493,10 @@ Options panels with one giant card that fills the screen.
    - **Pass Number** - required in Kiosk Mode (there's no OP-name
      alternative here, unlike the main app).
    - **Source Drive** - a dropdown of only genuinely external/removable
-     drives currently connected. Fixed/internal drives are never listed,
-     so a job can't accidentally be pointed at the system drive. If
-     nothing is listed, connect the drive and click **Refresh**.
+     drives currently connected, minus any blocked in Setup.ps1 (see
+     above). Fixed/internal drives are never listed, so a job can't
+     accidentally be pointed at the system drive. If nothing is listed,
+     connect the drive and click **Refresh**.
 2. Click **Start Transfer**. The **entire selected drive** is captured
    recursively, hashed, compressed and transferred - the same as adding
    that drive's root as a folder in the main app with "Select all

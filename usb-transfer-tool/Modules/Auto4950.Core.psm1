@@ -55,6 +55,11 @@ function Get-DefaultConfig {
         DarkMode            = $true                    # $false switches to a light theme
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
+        # --- Kiosk Mode ----------------------------------------------------------
+        KioskBlockedDrives  = @()                       # Drives that cannot be selected as a Kiosk Mode source.
+                                                          # Array of @{ Serial = '<VolumeSerialNumber>'; Label = '<for display>' }.
+                                                          # Matched by volume serial number so it still applies if the
+                                                          # drive letter changes. Managed from Setup.ps1's Kiosk Mode section.
     }
 }
 
@@ -1071,6 +1076,21 @@ function Get-A4950RemovableDrives {
     } catch {
         return @()
     }
+}
+
+function Get-A4950AvailableKioskDrives {
+    <#
+    .SYNOPSIS Kiosk Mode's selectable source drives - removable drives minus any blocked ones.
+    .DESCRIPTION
+        Same list as Get-A4950RemovableDrives, with any drive whose volume
+        serial number matches Config.KioskBlockedDrives filtered out (see
+        Get-DefaultConfig - managed from Setup.ps1's Kiosk Mode section).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Config)
+    $blocked = @($Config.KioskBlockedDrives | ForEach-Object { $_.Serial } | Where-Object { $_ })
+    if (-not $blocked.Count) { return @(Get-A4950RemovableDrives) }
+    return @(Get-A4950RemovableDrives | Where-Object { $_.VolumeSerialNumber -notin $blocked })
 }
 
 function Write-A4950Log {

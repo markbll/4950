@@ -17,5 +17,6 @@
   "SoundFinishPath": "",
   "SoundErrorPath": "",
   "FontSize": "Medium",
-  "DarkMode": true
+  "DarkMode": true,
+  "KioskBlockedDrives": []
 }

@@ -77,7 +77,7 @@ $configPath = Get-ConfigPath
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Auto 49/50 - Setup Wizard" Height="760" Width="640"
+        Title="Auto 49/50 - Setup Wizard" Height="860" Width="640"
         WindowStartupLocation="CenterScreen" Background="#FF2A2A33" FontFamily="Segoe UI">
   <ScrollViewer VerticalScrollBarVisibility="Auto">
   <StackPanel Margin="18">
@@ -134,6 +134,33 @@ $configPath = Get-ConfigPath
     </StackPanel>
     <TextBlock x:Name="KioskStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
 
+    <TextBlock Text="Blocked drives (cannot be selected in Kiosk Mode)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
+    <TextBlock Text="Stops a specific drive from ever being chosen as the Kiosk Mode source - e.g. a staff USB stick that should never be transferred. Matched by the drive's volume serial number, so it still applies if the drive letter changes." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <ListBox x:Name="BlockedList" Height="80" Background="#FF20202A" Foreground="#FFECECEC" Margin="0,0,0,6"/>
+    <StackPanel Orientation="Horizontal">
+      <Button x:Name="BtnBlockAdd" Content="Block a connected drive..." Padding="12,6" Margin="0,0,8,0" Background="#FF3A3A46" Foreground="#FFECECEC"/>
+      <Button x:Name="BtnBlockRemove" Content="Unblock selected" Padding="12,6" Background="#FF3A3A46" Foreground="#FFECECEC"/>
+    </StackPanel>
+    <TextBlock x:Name="BlockStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+    <TextBlock Text="Notification sounds (Kiosk Mode and the main app)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
+    <TextBlock Text="Optional .wav files played on the events below - leave blank for the default Windows sound. Used by Kiosk Mode and the main app's Options panel alike." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <TextBlock Text="Transfer started" Foreground="#FF9AA0A6" FontSize="11"/>
+    <DockPanel Margin="0,2,0,8">
+      <Button x:Name="BtnSoundStart" Content="Browse..." DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <TextBox x:Name="SoundStart" Padding="5" Background="#FF20202A" Foreground="#FFECECEC"/>
+    </DockPanel>
+    <TextBlock Text="Transfer completed" Foreground="#FF9AA0A6" FontSize="11"/>
+    <DockPanel Margin="0,2,0,8">
+      <Button x:Name="BtnSoundFinish" Content="Browse..." DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <TextBox x:Name="SoundFinish" Padding="5" Background="#FF20202A" Foreground="#FFECECEC"/>
+    </DockPanel>
+    <TextBlock Text="Transfer error" Foreground="#FF9AA0A6" FontSize="11"/>
+    <DockPanel Margin="0,2,0,10">
+      <Button x:Name="BtnSoundError" Content="Browse..." DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <TextBox x:Name="SoundError" Padding="5" Background="#FF20202A" Foreground="#FFECECEC"/>
+    </DockPanel>
+
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
       <Button x:Name="Save"   Content="Save configuration" Padding="16,7" Margin="4" Background="#FF2E7D32" Foreground="#FFECECEC"/>
       <Button x:Name="Cancel" Content="Close" Padding="16,7" Margin="4" Background="#FF3A3A46" Foreground="#FFECECEC"/>
@@ -160,6 +187,19 @@ $g = { param($n) $w.FindName($n) }
 (& $g 'Auto').IsChecked   = [bool]$config.AutoPromptOnInsert
 (& $g 'All').IsChecked    = [bool]$config.DefaultSelectAll
 (& $g 'Volume').Text = [string]([int]$config.VolumeSizeMB)
+(& $g 'SoundStart').Text  = $config.SoundStartPath
+(& $g 'SoundFinish').Text = $config.SoundFinishPath
+(& $g 'SoundError').Text  = $config.SoundErrorPath
+
+$script:BlockedDrives = New-Object System.Collections.Generic.List[object]
+foreach ($b in @($config.KioskBlockedDrives)) {
+    if ($b -and $b.Serial) { $script:BlockedDrives.Add([pscustomobject]@{ Serial = $b.Serial; Label = $b.Label }) }
+}
+function Update-BlockedList {
+    (& $g 'BlockedList').Items.Clear()
+    foreach ($b in $script:BlockedDrives) { [void](& $g 'BlockedList').Items.Add("$($b.Label)  [$($b.Serial)]") }
+}
+Update-BlockedList
 
 (& $g 'BtnTestNet').Add_Click({
     $path = (& $g 'Net').Text.Trim()
@@ -218,6 +258,97 @@ function New-A4950Shortcut {
     $sc.Save()
 }
 
+function Select-WavFile {
+    param([string]$Title = 'Select a .wav sound file')
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title  = $Title
+    $dlg.Filter = 'WAV audio (*.wav)|*.wav|All files (*.*)|*.*'
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+    return $null
+}
+(& $g 'BtnSoundStart').Add_Click({ $p = Select-WavFile -Title 'Select transfer-started sound (.wav)'; if ($p) { (& $g 'SoundStart').Text = $p } })
+(& $g 'BtnSoundFinish').Add_Click({ $p = Select-WavFile -Title 'Select transfer-completed sound (.wav)'; if ($p) { (& $g 'SoundFinish').Text = $p } })
+(& $g 'BtnSoundError').Add_Click({ $p = Select-WavFile -Title 'Select transfer-error sound (.wav)'; if ($p) { (& $g 'SoundError').Text = $p } })
+
+function Show-DrivePickerDialog {
+    <#
+    .SYNOPSIS Small modal to pick one connected drive from a list, for the "block a drive" flow.
+    #>
+    param([Parameter(Mandatory)][array]$Drives)
+    [xml]$pxaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Block a Drive" Height="220" Width="440" WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize" Background="#FF2A2A33" FontFamily="Segoe UI">
+  <StackPanel Margin="18">
+    <TextBlock Text="Select the connected drive to block from Kiosk Mode:" Foreground="#FFECECEC" TextWrapping="Wrap" Margin="0,0,0,10"/>
+    <ComboBox x:Name="CmbPick" Padding="6" FontSize="14"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+      <Button x:Name="BtnPCancel" Content="Cancel" Padding="14,6" Margin="4" Background="#FF3A3A46" Foreground="White" BorderThickness="0"/>
+      <Button x:Name="BtnPOk" Content="Block" Padding="14,6" Margin="4" Background="#FF8E2A2A" Foreground="White" BorderThickness="0" FontWeight="Bold"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $pw = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $pxaml))
+    $pg = { param($n) $pw.FindName($n) }
+    $pw.Owner = $w
+    foreach ($d in $Drives) {
+        $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
+        [void](& $pg 'CmbPick').Items.Add($label)
+    }
+    (& $pg 'CmbPick').SelectedIndex = 0
+    $script:DrivePickResult = $null
+    (& $pg 'BtnPCancel').Add_Click({ $pw.DialogResult = $false; $pw.Close() })
+    (& $pg 'BtnPOk').Add_Click({
+        $idx = (& $pg 'CmbPick').SelectedIndex
+        if ($idx -ge 0) { $script:DrivePickResult = $Drives[$idx] }
+        $pw.DialogResult = $true
+        $pw.Close()
+    })
+    [void]$pw.ShowDialog()
+    return $script:DrivePickResult
+}
+
+(& $g 'BtnBlockAdd').Add_Click({
+    $drives = @(Get-A4950RemovableDrives)
+    if (-not $drives.Count) {
+        (& $g 'BlockStatus').Text = 'No external/removable drive is currently connected. Connect the drive you want to block, then try again.'
+        (& $g 'BlockStatus').Foreground = '#FFFFCA28'
+        return
+    }
+    $picked = Show-DrivePickerDialog -Drives $drives
+    if (-not $picked) { return }
+    if (-not $picked.VolumeSerialNumber) {
+        (& $g 'BlockStatus').Text = 'That drive has no volume serial number to match against, so it cannot be blocked.'
+        (& $g 'BlockStatus').Foreground = '#FFEF5350'
+        return
+    }
+    if ($script:BlockedDrives.Serial -contains $picked.VolumeSerialNumber) {
+        (& $g 'BlockStatus').Text = 'That drive is already blocked.'
+        (& $g 'BlockStatus').Foreground = '#FF9AA0A6'
+        return
+    }
+    $label = "{0}  {1}" -f $picked.DeviceID, ($(if ($picked.VolumeName) { $picked.VolumeName } else { '(no label)' }))
+    $script:BlockedDrives.Add([pscustomobject]@{ Serial = $picked.VolumeSerialNumber; Label = $label })
+    Update-BlockedList
+    (& $g 'BlockStatus').Text = "Blocked $label. Click 'Save configuration' below to keep it."
+    (& $g 'BlockStatus').Foreground = '#FF66BB6A'
+})
+
+(& $g 'BtnBlockRemove').Add_Click({
+    $idx = (& $g 'BlockedList').SelectedIndex
+    if ($idx -lt 0) {
+        (& $g 'BlockStatus').Text = 'Select a blocked drive in the list first.'
+        (& $g 'BlockStatus').Foreground = '#FFFFCA28'
+        return
+    }
+    $script:BlockedDrives.RemoveAt($idx)
+    Update-BlockedList
+    (& $g 'BlockStatus').Text = "Unblocked. Click 'Save configuration' below to keep it."
+    (& $g 'BlockStatus').Foreground = '#FF66BB6A'
+})
+
 (& $g 'BtnKiosk').Add_Click({
     $kioskBat = Join-Path $scriptRoot 'Start-Auto4950-Kiosk.bat'
     if (-not (Test-Path -LiteralPath $kioskBat)) {
@@ -258,6 +389,10 @@ function New-A4950Shortcut {
     $config.EmbedManifest       = [bool](& $g 'Embed').IsChecked
     $config.AutoPromptOnInsert  = [bool](& $g 'Auto').IsChecked
     $config.DefaultSelectAll    = [bool](& $g 'All').IsChecked
+    $config.SoundStartPath      = (& $g 'SoundStart').Text.Trim()
+    $config.SoundFinishPath     = (& $g 'SoundFinish').Text.Trim()
+    $config.SoundErrorPath      = (& $g 'SoundError').Text.Trim()
+    $config.KioskBlockedDrives  = @($script:BlockedDrives | ForEach-Object { @{ Serial = $_.Serial; Label = $_.Label } })
     Save-A4950Config -Config $config -Path $configPath | Out-Null
 
     $issues = Test-A4950Config -Config $config
