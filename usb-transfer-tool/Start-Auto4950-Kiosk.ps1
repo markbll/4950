@@ -41,7 +41,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.7'
+$script:AppVersion = '6.8'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
