@@ -8,6 +8,37 @@ Nothing in this project deploys automatically. **Production is never deployed wi
 - [ ] Confirm the host runs **PHP 8.2+** (with `curl`, `dom`, `mbstring`) and Nginx (Apache works via the included `.htaccess` files, but Nginx is the supported target).
 - [ ] DNS + TLS for the staging host `website.bigcatmarketing.com.au` (cPanel: create the subdomain and run AutoSSL).
 
+## Automatic deploys with GitHub Actions
+
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on every push to `main`, and can also be started by hand from the Actions tab. Each run does this:
+
+1. Lint, tests (Node and PHP), then build.
+2. `npm run package` assembles `release/ftp/`.
+3. Uploads it with **SamKirkland/FTP-Deploy-Action v4.4.0** over **FTPS**, port 21, to `website.bigcatmarketing.com.au/`.
+
+The action keeps a sync-state file on the server, so later runs upload only what changed. It only ever deletes files it uploaded itself. `.well-known/`, `cgi-bin/`, `.ftpquota`, `.user.ini` and `_private/storage/` are always left alone.
+
+**Repository secrets** (GitHub → Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `FTP_SERVER` | `ftp.bigcatgroup.com.au` |
+| `FTP_USERNAME` | `website@bigcatmarketing.com.au` |
+| `FTP_PASSWORD` | the (rotated) FTP password |
+| `APP_SECRET` *(optional)* | `openssl rand -hex 32` |
+| `SMTP_HOST` *(optional)* | cPanel → Email Accounts → Connect Devices → Outgoing Server |
+| `SMTP_PASS` *(optional)* | the website@ email account's password |
+
+If `APP_SECRET` is set, the workflow writes `_private/bigcat.env` on every deploy. If it isn't, upload `bigcat.env` by hand once (from [`staging.env.template`](../deploy/staging.env.template)) and the workflow will not touch it.
+
+**Optional variables:**
+- `FTP_SERVER_DIR`: the remote folder. It must end in `/`, and the default is `website.bigcatmarketing.com.au/`. If the FTP account's home directory already **is** the subdomain folder (you'd see `.well-known`, `cgi-bin` and `.ftpquota` right after logging in), set this to `./`. Otherwise files end up in a nested folder.
+- `FTP_SECURITY`: set to `loose` only if the FTP certificate doesn't match the server name.
+- `SITE_ENV`: defaults to `staging`, which is noindex. Change it to `production` only at cutover, after sign-off.
+- `GA_MEASUREMENT_ID`: optional GA4 ID.
+
+**Manual upload** (no Actions): run `VITE_SITE_ENV=staging npm run build && npm run package`, then upload the **contents** of `release/ftp/` into the site folder with FileZilla (FTPS explicit, port 21). Keep the `release/bigcat-*.zip` copies as rollback points.
+
 ## Staging on cPanel / FTP — website.bigcatmarketing.com.au
 
 This is the likely path for the current host (FTP account `website@bigcatmarketing.com.au`). Run it **from your own computer**: the build environment used to create this site cannot reach FTP.

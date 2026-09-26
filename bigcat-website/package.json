@@ -25,7 +25,8 @@
     "check:facts": "node scripts/check-facts.mjs",
     "uat": "node scripts/uat.mjs",
     "htaccess": "node scripts/htaccess.mjs",
-    "deploy:staging": "bash scripts/deploy-ftp.sh staging"
+    "deploy:staging": "bash scripts/deploy-ftp.sh staging",
+    "package": "node scripts/package.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

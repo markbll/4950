@@ -139,6 +139,7 @@ $php = "env -u APP_SECRET -u STORAGE_DIR -u APP_ENV " . escapeshellarg(PHP_BINAR
 $locked = json_decode((string) shell_exec("$php " . escapeshellarg(__DIR__ . '/envfile.php') . ' locked'), true);
 check('env file in locked _private/ is loaded', ($locked['secret'] ?? false) === true);
 check('relative STORAGE_DIR resolves next to env file', ($locked['storage'] ?? false) === true);
+check('env values keep inner/trailing quotes, strip matching pair', ($locked['quotes'] ?? false) === true);
 $open = json_decode((string) shell_exec("$php " . escapeshellarg(__DIR__ . '/envfile.php') . ' open 2>/dev/null'), true);
 check('env file in unlocked web folder is ignored', ($open['secret'] ?? true) === false);
 

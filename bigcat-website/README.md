@@ -75,6 +75,7 @@ ALLOWED_ORIGINS=http://localhost:5173,http://localhost:4173 npm run dev:api
 | `sitemap` | Writes `dist/sitemap.xml` and an environment-aware `dist/robots.txt` |
 | `verify` | Build quality gate: titles, descriptions, canonicals, one H1, content length, JSON-LD, FAQPage rules, NAP identical on every page, no broken internal links, noindex on non-production, secret scan |
 | `htaccess` | Writes `dist/.htaccess` for Apache/LiteSpeed (cPanel) |
+| `package` | Assembles `release/ftp/` (site + API + locked `_private/`) and a zip for FTP upload |
 | `deploy:staging` | FTPS deploy to staging with backup (`scripts/deploy-ftp.sh`) |
 | `preview` | Local server that mimics the Nginx rules (clean URLs, 404, redirects, headers, cache) |
 | `lint` / `test` | See above |
@@ -149,6 +150,8 @@ API variables are read from the process environment (PHP-FPM `env[...]` or hosti
 ---
 
 ## Deploying to staging
+
+**GitHub Actions (recommended):** pushing to `main` builds, tests and deploys over FTPS. See [docs/DEPLOYMENT.md § Automatic deploys](docs/DEPLOYMENT.md#automatic-deploys-with-github-actions) for the required secrets.
 
 **cPanel / FTP host (current hosting):** follow [docs/DEPLOYMENT.md § Staging on cPanel / FTP](docs/DEPLOYMENT.md#staging-on-cpanel--ftp--websitebigcatmarketingcomau). In short: `VITE_SITE_ENV=staging npm run build`, then `FTP_HOST=… FTP_USER=… ENV_FILE=~/bigcat-staging.env npm run deploy:staging` (FTPS, backs up first, supports rollback). The build generates `dist/.htaccess` with the same routing, redirects, cache rules and headers as the Nginx config.
 

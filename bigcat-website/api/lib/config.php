@@ -59,7 +59,10 @@ function bigcat_load_env_file(): void
             if (!preg_match('/^[A-Z][A-Z0-9_]*$/', $k)) {
                 continue;
             }
-            $v = trim($v, "\"'");
+            // Strip one pair of matching surrounding quotes only (a secret may end in a quote character).
+            if (strlen($v) >= 2 && ($v[0] === '"' || $v[0] === "'") && $v[-1] === $v[0]) {
+                $v = substr($v, 1, -1);
+            }
             if (getenv($k) === false) {
                 putenv("$k=$v");
             }

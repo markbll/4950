@@ -1,0 +1,120 @@
+# Build, test and FTP-deploy the site to cPanel on every push to main.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions → Secrets):
+#   FTP_SERVER     e.g. ftp.bigcatgroup.com.au
+#   FTP_USERNAME   e.g. website@bigcatmarketing.com.au
+#   FTP_PASSWORD   the FTP account password
+#
+# Optional secrets. If APP_SECRET is set, the workflow writes _private/bigcat.env
+# on the server; otherwise it leaves any bigcat.env you uploaded by hand alone.
+#   APP_SECRET     output of `openssl rand -hex 32`
+#   SMTP_HOST      cPanel → Email Accounts → Connect Devices → Outgoing Server
+#   SMTP_PASS      password of the sending email account
+#
+# Optional repository variables (Settings → … → Variables):
+#   SITE_ENV        staging (default) | production — production is indexable and needs the domain switched
+#   FTP_SERVER_DIR  remote root folder, must end with "/" (default: website.bigcatmarketing.com.au/)
+#   FTP_SECURITY    strict (default, verify TLS certificate) | loose
+name: Deploy to cPanel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SITE_ENV: ${{ vars.SITE_ENV || 'staging' }}
+  SITE_HOST: ${{ (vars.SITE_ENV == 'production') && 'bigcatmarketing.com.au' || 'website.bigcatmarketing.com.au' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check PHP
+        run: php -v && php -m | grep -Ei '^(curl|dom|mbstring)$'
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build (${{ env.SITE_ENV }})
+        env:
+          VITE_SITE_ENV: ${{ env.SITE_ENV }}
+          VITE_SITE_URL: https://bigcatmarketing.com.au
+          VITE_GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
+        run: npm run build
+
+      - name: Package upload folder
+        env:
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: |
+          if [ -n "$APP_SECRET" ]; then
+            export BIGCAT_ENV_CONTENT="APP_ENV=${SITE_ENV}
+          APP_SECRET=${APP_SECRET}
+          ALLOWED_ORIGINS=https://${SITE_HOST}
+          STORAGE_DIR=storage
+          MAIL_TRANSPORT=smtp
+          MAIL_TO=info@bigcatmarketing.com.au
+          MAIL_FROM=website@bigcatmarketing.com.au
+          MAIL_FROM_NAME=Big Cat Marketing Website
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=465
+          SMTP_SECURE=ssl
+          SMTP_USER=website@bigcatmarketing.com.au
+          SMTP_PASS=${SMTP_PASS}
+          CHECKUP_FETCH_ENABLED=1"
+          fi
+          npm run package
+          rm -f release/*.zip
+
+      - name: Deploy via FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          security: ${{ vars.FTP_SECURITY || 'strict' }}
+          local-dir: ./release/ftp/
+          server-dir: ${{ vars.FTP_SERVER_DIR || 'website.bigcatmarketing.com.au/' }}
+          # Host-managed files are never touched. Only files this action uploaded are ever deleted.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            .well-known/**
+            cgi-bin/**
+            .ftpquota
+            .user.ini
+            _private/storage/**
+          log-level: standard
+
+      - name: Health check
+        if: success()
+        continue-on-error: true
+        run: |
+          sleep 5
+          curl -fsS --max-time 20 "https://${SITE_HOST}/api/health.php" || echo "::warning::health.php not OK (password-protected staging returns 401 — check it in a browser)"
