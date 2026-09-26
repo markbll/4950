@@ -21,6 +21,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: connect and list what would change, but upload nothing"
+        type: boolean
+        default: true
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -125,10 +130,11 @@ jobs:
             .ftpquota
             .user.ini
             _private/storage/**
-          log-level: standard
+          log-level: ${{ inputs.dry_run && 'verbose' || 'standard' }}
+          dry-run: ${{ inputs.dry_run || false }}
 
       - name: Health check
-        if: success()
+        if: success() && !inputs.dry_run
         continue-on-error: true
         run: |
           sleep 5
