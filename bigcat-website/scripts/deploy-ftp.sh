@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # Deploy a built release to cPanel/FTP hosting over FTPS (TLS required).
 #
-#   FTP_HOST=ftp.bigcatmarketing.com.au FTP_USER='website@bigcatmarketing.com.au' \
+#   FTP_HOST=ftp.bigcatgroup.com.au FTP_USER='website@bigcatmarketing.com.au' \
 #     ./scripts/deploy-ftp.sh staging
 #
 # - The password is read from $FTP_PASS if set, otherwise prompted (hidden).
@@ -26,6 +26,12 @@ case "$TARGET" in
   staging|production|rollback) ;;
   *) echo "Usage: $0 staging|production|rollback <backup-folder>"; exit 2 ;;
 esac
+
+if [ -n "${ENV_FILE:-}" ]; then
+  [ -f "$ENV_FILE" ] || { echo "ENV_FILE not found: $ENV_FILE"; exit 1; }
+  if grep -qE '=<[^>]*>' "$ENV_FILE"; then echo "Refusing: $ENV_FILE still has unfilled <...> values:"; grep -nE '=<[^>]*>' "$ENV_FILE" | cut -d= -f1; exit 1; fi
+  case "$(cd "$(dirname "$ENV_FILE")" && pwd)" in "$(pwd)"*) echo "Refusing: keep ENV_FILE outside the repo (it contains secrets)."; exit 1;; esac
+fi
 
 command -v lftp >/dev/null || { echo "lftp is required (brew install lftp / apt install lftp)"; exit 1; }
 : "${FTP_HOST:?Set FTP_HOST}"
@@ -86,7 +92,6 @@ mkdir -p "$PRIV/storage"
 cp deploy/private-template/.htaccess "$PRIV/storage/.htaccess"
 CMDS="mkdir -p -f '$REMOTE/_private/storage'; put -O '$REMOTE/_private' '$PRIV/.htaccess'; put -O '$REMOTE/_private/storage' '$PRIV/storage/.htaccess'"
 if [ -n "${ENV_FILE:-}" ]; then
-  [ -f "$ENV_FILE" ] || { echo "ENV_FILE not found: $ENV_FILE"; exit 1; }
   CMDS="$CMDS; put -O '$REMOTE/_private' '$ENV_FILE' -o bigcat.env; chmod 600 '$REMOTE/_private/bigcat.env'"
   echo "  uploading $ENV_FILE → _private/bigcat.env"
 fi

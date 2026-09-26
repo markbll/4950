@@ -22,7 +22,7 @@ This is the likely path for the current host (FTP account `website@bigcatmarketi
 6. cPanel → Email Accounts: create a sending account (e.g. `website@bigcatmarketing.com.au` or `noreply@…`) for SMTP. Note its SMTP host/port from "Connect Devices".
 7. If the subdomain folder already has an `.htaccess` with a PHP `AddHandler` block from MultiPHP, copy those lines into `deploy/apache/htaccess.local` (see `deploy/apache/README.md`).
 
-**Create the staging config file** on your computer (never commit it), e.g. `~/bigcat-staging.env`:
+**Create the staging config file** on your computer (never commit it): copy [`deploy/staging.env.template`](../deploy/staging.env.template) to `~/bigcat-staging.env` and fill the three `<...>` values. It looks like this:
 
 ```ini
 APP_ENV=staging
@@ -50,7 +50,7 @@ RATE_LIMIT_SCALE=10
 ```bash
 npm ci && npm run lint && npm test
 VITE_SITE_ENV=staging npm run build
-FTP_HOST=ftp.bigcatmarketing.com.au FTP_USER='website@bigcatmarketing.com.au' \
+FTP_HOST=ftp.bigcatgroup.com.au FTP_USER='website@bigcatmarketing.com.au' \
   ENV_FILE=~/bigcat-staging.env npm run deploy:staging      # prompts for the password
 ```
 
@@ -61,7 +61,7 @@ The script ([`scripts/deploy-ftp.sh`](../scripts/deploy-ftp.sh), needs `lftp`) d
 3. It creates `_private/` with a deny-all `.htaccess` and uploads your env file as `_private/bigcat.env` (mode 600).
 4. It refuses to push a production build to staging, and refuses production at all unless `CONFIRM_PRODUCTION=yes`.
 
-If the host's certificate doesn't match `ftp.bigcatmarketing.com.au`, try `FTP_HOST=bigcatmarketing.com.au`, or the server hostname cPanel shows under FTP Accounts → Configure FTP Client. Don't turn certificate checks off.
+FTP server: `ftp.bigcatgroup.com.au`, port 21, explicit FTPS (the script's default). If lftp reports a certificate name mismatch, use the server hostname cPanel shows under FTP Accounts → Configure FTP Client. Don't turn certificate checks off.
 
 **Verify**
 
