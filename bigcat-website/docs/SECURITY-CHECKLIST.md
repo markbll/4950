@@ -20,7 +20,7 @@
 - ✅ `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (camera, mic, geolocation, payment, usb off), COOP.
 - ✅ `server_tokens off`; `X-Powered-By` removed by PHP.
 - ✅ Dotfiles and build metadata not served; `/api/lib`, `/api/tests`, `dev-router.php` return 404 (Nginx) / denied (`.htaccess`).
-- ☐ TLS certificate for a staging hostname **without an underscore** (CAs refuse underscores).
+- ☐ TLS certificate for `website.bigcatmarketing.com.au` (AutoSSL / Let's Encrypt).
 
 ## Forms / API
 

@@ -6,9 +6,77 @@ Nothing in this project deploys automatically. **Production is never deployed wi
 
 - [ ] The previously shared FTP credential is **compromised**. Rotate it now. Prefer SFTP with SSH keys; if only FTP exists, use FTPS (explicit TLS) and a new, unique password stored in a password manager — never in this repo, chat or email.
 - [ ] Confirm the host runs **PHP 8.2+** (with `curl`, `dom`, `mbstring`) and Nginx (Apache works via the included `.htaccess` files, but Nginx is the supported target).
-- [ ] Choose a staging hostname **without an underscore** (e.g. `ai-website.bigcatmarketing.com.au`) — see README.
+- [ ] DNS + TLS for the staging host `website.bigcatmarketing.com.au` (cPanel: create the subdomain and run AutoSSL).
 
-## 1. Build
+## Staging on cPanel / FTP — website.bigcatmarketing.com.au
+
+This is the likely path for the current host (FTP account `website@bigcatmarketing.com.au`). Run it **from your own computer**: the build environment used to create this site cannot reach FTP.
+
+**One-time setup in cPanel**
+
+1. **Change the FTP password** (it was shared in plain text). cPanel → FTP Accounts → `website@…` → Change Password. Store the new one in a password manager only.
+2. cPanel → Domains: create `website.bigcatmarketing.com.au`. Note its document root, and check that the FTP account's home directory **is** that document root.
+3. cPanel → SSL/TLS Status → run AutoSSL for the subdomain (HTTPS must work before testing forms).
+4. cPanel → MultiPHP Manager → set the subdomain to **PHP 8.2 or newer**. Check that the `curl`, `dom`/`xml` and `mbstring` extensions are enabled (Select PHP Version → Extensions).
+5. cPanel → Directory Privacy → password-protect the subdomain folder (keeps staging private).
+6. cPanel → Email Accounts: create a sending account (e.g. `website@bigcatmarketing.com.au` or `noreply@…`) for SMTP. Note its SMTP host/port from "Connect Devices".
+7. If the subdomain folder already has an `.htaccess` with a PHP `AddHandler` block from MultiPHP, copy those lines into `deploy/apache/htaccess.local` (see `deploy/apache/README.md`).
+
+**Create the staging config file** on your computer (never commit it), e.g. `~/bigcat-staging.env`:
+
+```ini
+APP_ENV=staging
+APP_SECRET=<output of: openssl rand -hex 32>
+ALLOWED_ORIGINS=https://website.bigcatmarketing.com.au
+STORAGE_DIR=storage
+MAIL_TRANSPORT=smtp
+MAIL_TO=info@bigcatmarketing.com.au
+MAIL_FROM=<the sending account>
+MAIL_FROM_NAME=Big Cat Marketing Website
+SMTP_HOST=<from cPanel, e.g. mail.bigcatmarketing.com.au>
+SMTP_PORT=465
+SMTP_SECURE=ssl
+SMTP_USER=<the sending account>
+SMTP_PASS=<its password>
+CHECKUP_FETCH_ENABLED=1
+# UAT only (the automated UAT makes more submissions than the normal limits allow). Remove after UAT.
+RATE_LIMIT_SCALE=10
+```
+
+`STORAGE_DIR=storage` resolves to `_private/storage/`. If the FTP account can reach the folder **above** the web root, put the file in `../bigcat-private/bigcat.env` instead (preferred; the API looks there first).
+
+**Build and deploy**
+
+```bash
+npm ci && npm run lint && npm test
+VITE_SITE_ENV=staging npm run build
+FTP_HOST=ftp.bigcatmarketing.com.au FTP_USER='website@bigcatmarketing.com.au' \
+  ENV_FILE=~/bigcat-staging.env npm run deploy:staging      # prompts for the password
+```
+
+The script ([`scripts/deploy-ftp.sh`](../scripts/deploy-ftp.sh), needs `lftp`) does four things:
+
+1. It backs up the current remote folder to `backups/staging-<time>/`.
+2. It uploads over **FTPS** only (it refuses plain FTP), mirroring `dist/` plus `api/` and deleting stale files. It never touches `_private/`, `.well-known/`, `cgi-bin/` or `.user.ini`.
+3. It creates `_private/` with a deny-all `.htaccess` and uploads your env file as `_private/bigcat.env` (mode 600).
+4. It refuses to push a production build to staging, and refuses production at all unless `CONFIRM_PRODUCTION=yes`.
+
+If the host's certificate doesn't match `ftp.bigcatmarketing.com.au`, try `FTP_HOST=bigcatmarketing.com.au`, or the server hostname cPanel shows under FTP Accounts → Configure FTP Client. Don't turn certificate checks off.
+
+**Verify**
+
+```bash
+curl -u <user>:<pass> https://website.bigcatmarketing.com.au/api/health.php     # every check true
+BASE_URL=https://website.bigcatmarketing.com.au BASIC_AUTH=<user>:<pass> SKIP_RATE_LIMIT=1 npm run uat
+```
+
+The UAT sends real test enquiries to `MAIL_TO`, so warn the inbox owner. Then work through the manual items in [UAT-CHECKLIST.md](UAT-CHECKLIST.md).
+
+**Roll back:** `FTP_HOST=… FTP_USER=… ./scripts/deploy-ftp.sh rollback backups/staging-<time>`
+
+This flow was tested end to end in the build environment against a local FTPS server and Apache 2.4. The `.htaccess` routing, the `_private/` env-file discovery with no server environment variables, and a rollback all worked, and the UAT passed 411/411.
+
+## 1. Build (Nginx / VPS path)
 
 ```bash
 npm ci
@@ -64,7 +132,7 @@ sudo ln -s /etc/nginx/sites-available/bigcat.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Certificates: `certbot certonly --webroot -w /var/www/letsencrypt -d ai-website.bigcatmarketing.com.au`.
+Certificates: `certbot certonly --webroot -w /var/www/letsencrypt -d website.bigcatmarketing.com.au`.
 
 ## 4. Deploy to staging
 
@@ -81,8 +149,8 @@ sudo systemctl reload php8.3-fpm     # clears OPcache for the new PHP files
 ## 5. Verify staging
 
 ```bash
-curl -s -u user:pass https://ai-website.bigcatmarketing.com.au/api/health.php   # all checks true
-BASE_URL=https://ai-website.bigcatmarketing.com.au BASIC_AUTH=user:pass node scripts/uat.mjs
+curl -s -u user:pass https://website.bigcatmarketing.com.au/api/health.php   # all checks true
+BASE_URL=https://website.bigcatmarketing.com.au BASIC_AUTH=user:pass node scripts/uat.mjs
 ```
 
 Then work through the manual items in [UAT-CHECKLIST.md](UAT-CHECKLIST.md).

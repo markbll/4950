@@ -28,7 +28,14 @@ Run against the **real Nginx site rules** (`deploy/nginx/bigcat-site.conf`, `ngi
 | Reflow at 320 px (≈400% zoom), all routes | 39/39 ✅ |
 | **Total** | **411/411 ✅** |
 
-Also passing: `npm run lint`, 80 Vitest tests, 91 PHP tests, `npm run verify` build gate.
+Also passing: `npm run lint`, 80 Vitest tests, 94 PHP tests, `npm run verify` build gate.
+
+**Re-run after business facts were added (same day), 411/411 in each of three set-ups:**
+1. the Nginx rules
+2. Apache 2.4 using the generated `dist/.htaccess` (the cPanel path)
+3. a copy deployed with `scripts/deploy-ftp.sh` over FTPS, where the API read its settings **only** from `_private/bigcat.env` with no server environment variables
+
+`phone_click` is now tested against the real `tel:+61418583238` link. Rollback with the deploy script was also tested.
 
 **Not verified here, must be done on the server:** HTTPS/certificates, PHP-FPM FastCGI, real SMTP delivery, basic auth, a live website fetch in the check-up (outbound HTTP was blocked here, so only the "could not connect" path ran end-to-end; the HTML analysis is covered by PHP tests), GA4 receiving events, Lighthouse on real hosting.
 
@@ -60,7 +67,7 @@ Also passing: `npm run lint`, 80 Vitest tests, 91 PHP tests, `npm run verify` bu
 
 ### Analytics
 - [ ] page_view, package_view, location_page_view(region), checkup_start, checkup_complete, lead_submit(tier), contact_submit, consultation_click(in_person|video), email_click, directions_click, cta_click, UTM — *automated*
-- [ ] phone_click — 👤 once `business.phone` is set
+- [x] phone_click — *automated*
 - [ ] No personal information in events — *automated*
 - [ ] 👤 GA4 DebugView receives events on production
 
@@ -83,7 +90,7 @@ Also passing: `npm run lint`, 80 Vitest tests, 91 PHP tests, `npm run verify` bu
 
 ### Security and server
 - [ ] Security headers on HTML, assets and API — *automated*
-- [ ] 👤 HTTPS valid (staging hostname without underscore), HTTP→HTTPS, www→apex
+- [ ] 👤 HTTPS valid on website.bigcatmarketing.com.au, HTTP→HTTPS, www→apex
 - [ ] `/api/health.php` all true — *automated*
 - [ ] 👤 PHP error log clean after UAT; no warnings
 - [ ] 👤 FTP credential rotated

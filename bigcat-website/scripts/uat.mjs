@@ -1,7 +1,7 @@
 /**
  * Automated UAT run (complements the manual checklist in docs/UAT-CHECKLIST.md).
  *
- *   BASE_URL=https://ai-website.bigcatmarketing.com.au \
+ *   BASE_URL=https://website.bigcatmarketing.com.au \
  *   BASIC_AUTH=user:pass EXPECT_NOINDEX=1 MAIL_LOG_DIR=... node scripts/uat.mjs
  *
  * Checks every route (direct load, raw HTML content, headers, cache), redirects,
@@ -194,9 +194,9 @@ for (const p of paths) {
   await page.click('a[data-track="directions_click"]');
   const dl = await page.evaluate(() => window.dataLayer);
   record('analytics', 'directions_click', dl.some((e) => e.event === 'directions_click'));
-  const hasTel = await page.$('a[href^="tel:"]');
-  if (hasTel) {
-    await hasTel.click();
+  const tel = page.locator('main a[href^="tel:"]').first();
+  if (await tel.count()) {
+    await tel.click();
     record('analytics', 'phone_click', (await page.evaluate(() => window.dataLayer)).some((e) => e.event === 'phone_click'));
   } else record('analytics', 'phone_click (skipped — no phone in business.ts yet)', true, 'TODO: re-run once phone is set');
   await page.evaluate(() => document.querySelector('#map-heading')?.scrollIntoView());

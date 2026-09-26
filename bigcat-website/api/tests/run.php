@@ -134,6 +134,14 @@ $eml = (string) file_get_contents((glob($storage . '/mail-log/*.eml') ?: [''])[0
 check('no header injection in mail', !preg_match('/^Bcc:/mi', $eml));
 check('invalid reply-to dropped', !str_contains($eml, 'Reply-To'));
 
+// --- env file discovery (separate processes: config caches its first load)
+$php = "env -u APP_SECRET -u STORAGE_DIR -u APP_ENV " . escapeshellarg(PHP_BINARY);
+$locked = json_decode((string) shell_exec("$php " . escapeshellarg(__DIR__ . '/envfile.php') . ' locked'), true);
+check('env file in locked _private/ is loaded', ($locked['secret'] ?? false) === true);
+check('relative STORAGE_DIR resolves next to env file', ($locked['storage'] ?? false) === true);
+$open = json_decode((string) shell_exec("$php " . escapeshellarg(__DIR__ . '/envfile.php') . ' open 2>/dev/null'), true);
+check('env file in unlocked web folder is ignored', ($open['secret'] ?? true) === false);
+
 // cleanup
 foreach (array_merge(glob($storage . '/*/*') ?: [], glob($storage . '/*') ?: []) as $f) {
     is_dir($f) ? @rmdir($f) : @unlink($f);

@@ -9,11 +9,11 @@ Forms post to a small, dependency-free **PHP API**.
 | | |
 |---|---|
 | Production | https://bigcatmarketing.com.au/ — **do not change until UAT sign-off + explicit approval** |
-| Staging | `ai_website.bigcatmarketing.com.au` — see the [staging hostname warning](#staging-hostname-warning) |
+| Staging | https://website.bigcatmarketing.com.au/ (private: basic auth + noindex) |
 | Stack | React 19 + TypeScript + Vite 7 (SSR prerender), PHP 8.2+ API, Nginx |
 
-> **Security:** the FTP credential shared earlier is compromised. **Rotate it
-> before any production deploy**, and use SFTP/SSH keys if the host supports
+> **Security:** FTP passwords shared in chat or email must be treated as compromised. **Change the FTP password
+> before deploying**, and use SFTP/SSH keys if the host supports
 > them. No secrets are stored in this repository; see [`.env.example`](.env.example).
 
 ---
@@ -70,10 +70,12 @@ ALLOWED_ORIGINS=http://localhost:5173,http://localhost:4173 npm run dev:api
 |---|---|
 | `dev` | Vite dev server; pages are server-rendered with the same code as the prerender |
 | `dev:api` | PHP built-in server for `api/` (development only) |
-| `build` | `build:client` → `build:ssr` → `prerender` → `sitemap` → `verify` |
+| `build` | `build:client` → `build:ssr` → `prerender` → `sitemap` → `htaccess` → `verify` |
 | `prerender` | Writes `dist/<route>/index.html` for all 39 routes + `dist/404.html` |
 | `sitemap` | Writes `dist/sitemap.xml` and an environment-aware `dist/robots.txt` |
 | `verify` | Build quality gate: titles, descriptions, canonicals, one H1, content length, JSON-LD, FAQPage rules, NAP identical on every page, no broken internal links, noindex on non-production, secret scan |
+| `htaccess` | Writes `dist/.htaccess` for Apache/LiteSpeed (cPanel) |
+| `deploy:staging` | FTPS deploy to staging with backup (`scripts/deploy-ftp.sh`) |
 | `preview` | Local server that mimics the Nginx rules (clean URLs, 404, redirects, headers, cache) |
 | `lint` / `test` | See above |
 | `check:facts` | Lists business facts still TODO in `src/data/business.ts` |
@@ -148,7 +150,9 @@ API variables are read from the process environment (PHP-FPM `env[...]` or hosti
 
 ## Deploying to staging
 
-Full step-by-step instructions: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. In short:
+**cPanel / FTP host (current hosting):** follow [docs/DEPLOYMENT.md § Staging on cPanel / FTP](docs/DEPLOYMENT.md#staging-on-cpanel--ftp--websitebigcatmarketingcomau). In short: `VITE_SITE_ENV=staging npm run build`, then `FTP_HOST=… FTP_USER=… ENV_FILE=~/bigcat-staging.env npm run deploy:staging` (FTPS, backs up first, supports rollback). The build generates `dist/.htaccess` with the same routing, redirects, cache rules and headers as the Nginx config.
+
+**Nginx / VPS host:** full instructions in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. In short:
 
 ```bash
 npm ci && npm run lint && npm run test
@@ -165,9 +169,9 @@ private/bigcat.env, private/storage/   ← created once, outside the web root
 
 Then check `https://<staging-host>/api/health.php` returns `"ok": true` and run the UAT.
 
-### Staging hostname warning
+### Staging host
 
-`ai_website` contains an **underscore**. Public certificate authorities (including Let's Encrypt) do not issue certificates for hostnames with underscores, so **HTTPS cannot work on `ai_website.bigcatmarketing.com.au`**. Use `ai-website.bigcatmarketing.com.au` (hyphen) or `staging.bigcatmarketing.com.au`. The Nginx config uses `ai-website`. Keep staging behind HTTP basic auth.
+Staging is `website.bigcatmarketing.com.au`. It needs a DNS record (A record to the hosting server, or a cPanel subdomain) and a TLS certificate (cPanel AutoSSL or Let's Encrypt) before it can be used. Keep it behind HTTP basic auth (cPanel → Directory Privacy, or Nginx `auth_basic`).
 
 ---
 

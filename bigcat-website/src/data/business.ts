@@ -69,14 +69,14 @@ export interface Business {
 export const business: Business = {
   name: 'Big Cat Marketing',
   legalName: null, // TODO(fact): registered entity name, if different from trading name
-  abn: null, // TODO(fact): ABN — shown in footer + terms once supplied
+  abn: '49 514 253 509',
   tagline: "Melbourne's local marketing team for small business.",
   description:
     'Big Cat Marketing is a Melbourne-based local marketing team for small and medium-sized businesses. We help businesses show up on Google Maps, in local search and across their community, working in person or by video across Greater Melbourne and remotely Australia-wide.',
   url: siteConfig.siteUrl,
   logoPath: '/logo.png', // TODO(fact): replace public/logo.png with the approved brand logo
-  phone: null, // TODO(fact): e.g. { display: '03 XXXX XXXX', e164: '+613XXXXXXXX' }
-  email: null, // TODO(fact): public enquiries email address
+  phone: { display: '0418 58 32 38', e164: '+61418583238' }, // must match Google Business Profile exactly
+  email: 'info@bigcatmarketing.com.au',
   address: {
     isPublic: false, // TODO(fact): confirm whether a street address may be published
     streetAddress: null, // TODO(fact): only if isPublic is true
@@ -109,11 +109,11 @@ export const business: Business = {
   ],
   hours: null, // TODO(fact): e.g. [{ days: ['Monday','Tuesday','Wednesday','Thursday','Friday'], opens: '09:00', closes: '17:00' }]
   hoursNote: 'By appointment', // TODO(fact): confirm public hours wording
-  googleBusinessProfileUrl: null, // TODO(fact): Google Business Profile share URL
+  googleBusinessProfileUrl: 'https://share.google/nSVP2PFLOOciJUyDQ',
   social: {
-    facebook: null, // TODO(fact)
-    instagram: null, // TODO(fact)
-    linkedin: null, // TODO(fact)
+    facebook: 'https://facebook.com/bigcatmarketing',
+    instagram: 'https://www.instagram.com/bigcatmarketing',
+    linkedin: 'https://www.linkedin.com/company/bigcatmarketing',
   },
   responseTime: 'within 1 business day', // TODO(fact): confirm the team can meet this
 };

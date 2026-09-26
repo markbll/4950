@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "php -S 127.0.0.1:8000 api/dev-router.php",
-    "build": "npm run build:client && npm run build:ssr && npm run prerender && npm run sitemap && npm run verify",
+    "build": "npm run build:client && npm run build:ssr && npm run prerender && npm run sitemap && npm run htaccess && npm run verify",
     "build:client": "tsc --noEmit && vite build",
     "build:ssr": "vite build --ssr src/entry-server.tsx --outDir dist-ssr",
     "prerender": "node scripts/prerender.mjs",
@@ -23,7 +23,9 @@
     "test:watch": "vitest",
     "docs:generate": "node scripts/generate-docs.mjs",
     "check:facts": "node scripts/check-facts.mjs",
-    "uat": "node scripts/uat.mjs"
+    "uat": "node scripts/uat.mjs",
+    "htaccess": "node scripts/htaccess.mjs",
+    "deploy:staging": "bash scripts/deploy-ftp.sh staging"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
