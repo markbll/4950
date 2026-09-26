@@ -57,7 +57,7 @@ FTP_HOST=ftp.bigcatmarketing.com.au FTP_USER='website@bigcatmarketing.com.au' \
 The script ([`scripts/deploy-ftp.sh`](../scripts/deploy-ftp.sh), needs `lftp`) does four things:
 
 1. It backs up the current remote folder to `backups/staging-<time>/`.
-2. It uploads over **FTPS** only (it refuses plain FTP), mirroring `dist/` plus `api/` and deleting stale files. It never touches `_private/`, `.well-known/`, `cgi-bin/` or `.user.ini`.
+2. It uploads over **FTPS** only (it refuses plain FTP), mirroring `dist/` plus `api/` and deleting stale files. It never touches `_private/`, `.well-known/`, `cgi-bin/`, `.user.ini` or `.ftpquota`.
 3. It creates `_private/` with a deny-all `.htaccess` and uploads your env file as `_private/bigcat.env` (mode 600).
 4. It refuses to push a production build to staging, and refuses production at all unless `CONFIRM_PRODUCTION=yes`.
 

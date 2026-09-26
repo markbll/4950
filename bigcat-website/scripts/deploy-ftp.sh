@@ -38,13 +38,16 @@ export LFTP_PASSWORD="$FTP_PASS"
 unset FTP_PASS
 
 LFTP_SETTINGS="set ftp:ssl-force true; set ftp:ssl-protect-data true; set ssl:verify-certificate ${FTP_VERIFY_CERT:-yes}; set net:max-retries 3; set net:timeout 30; set ftp:passive-mode true; set ftp:list-options -a"
+# Host-managed files that must never be deleted or overwritten on the server:
+# private config, ACME challenges, cgi-bin, PHP settings, the FTP quota file, local backups.
+KEEP="--exclude-glob _private/ --exclude-glob .well-known/ --exclude-glob cgi-bin/ --exclude-glob .user.ini --exclude-glob .ftpquota --exclude-glob backups/"
 run_lftp() { lftp --env-password -u "$FTP_USER" -e "$LFTP_SETTINGS; $1; bye" "$FTP_HOST"; }
 
 if [ "$TARGET" = rollback ]; then
   SRC="${2:?Usage: $0 rollback backups/<folder>}"
   [ -d "$SRC" ] || { echo "No such backup folder: $SRC"; exit 1; }
   echo "Restoring $SRC → $FTP_HOST:$REMOTE (private config untouched)"
-  run_lftp "mirror -R --delete --exclude-glob _private/ --exclude-glob .well-known/ --exclude-glob .user.ini --exclude-glob cgi-bin/ '$SRC' '$REMOTE'"
+  run_lftp "mirror -R --delete $KEEP '$SRC' '$REMOTE'"
   echo "✔ Rolled back. Check /api/health.php and the home page."
   exit 0
 fi
@@ -62,7 +65,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="backups/$TARGET-$STAMP"
 mkdir -p "$BACKUP"
 echo "1/4 Backing up current remote site → $BACKUP"
-run_lftp "mirror --exclude-glob _private/ --exclude-glob backups/ '$REMOTE' '$BACKUP'" || echo "  (nothing to back up)"
+run_lftp "mirror $KEEP '$REMOTE' '$BACKUP'" || echo "  (nothing to back up)"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -74,7 +77,7 @@ cp -a api/. "$STAGE/api/"
 rm -rf "$STAGE/api/tests" "$STAGE/api/dev-router.php"
 
 echo "2/4 Uploading site + API → $FTP_HOST:$REMOTE"
-run_lftp "mirror -R --delete --exclude-glob _private/ --exclude-glob .well-known/ --exclude-glob backups/ --exclude-glob cgi-bin/ --exclude-glob .user.ini --exclude-glob .well-known/ '$STAGE' '$REMOTE'"
+run_lftp "mirror -R --delete $KEEP '$STAGE' '$REMOTE'"
 
 echo "3/4 Ensuring locked _private/ folder"
 PRIV="$(mktemp -d)"
