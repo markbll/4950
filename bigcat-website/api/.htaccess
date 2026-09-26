@@ -1,0 +1,5 @@
+# Apache fallback (Nginx config lives in deploy/nginx). Deny everything except the public endpoints.
+<FilesMatch "^(?!(contact|checkup|subscribe|health|token)\.php$).*$">
+  Require all denied
+</FilesMatch>
+Options -Indexes

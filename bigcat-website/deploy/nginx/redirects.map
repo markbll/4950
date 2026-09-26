@@ -1,0 +1,38 @@
+# Legacy URL → new URL (301). Loaded by `map $uri $bigcat_redirect { include ...; }`.
+# Format:  /old-path   /new-path;
+#
+# !!! CANDIDATES ONLY — the existing site could not be crawled when this map was drafted.
+# Before production cutover: export every URL from the CURRENT site (old sitemap.xml,
+# Search Console > Pages, Google Analytics landing pages, and a crawl), then confirm,
+# add or remove lines so every legacy URL with traffic or backlinks maps to its closest
+# new page. Never redirect everything to the homepage. See docs/REDIRECTS.md.
+/home                          /;
+/index.php                     /;
+/about-us                      /about;
+/about-us/                     /about;
+/contact-us                    /contact;
+/contact-us/                   /contact;
+/our-services                  /services;
+/our-services/                 /services;
+/pricing                       /packages;
+/pricing/                      /packages;
+/plans                         /packages;
+/seo                           /services/local-seo;
+/local-seo                     /services/local-seo;
+/google-my-business            /services/google-business-profile;
+/google-business-profile       /services/google-business-profile;
+/web-design                    /services/websites;
+/website-design                /services/websites;
+/social-media-marketing        /services/social-media;
+/google-ads                    /services/local-ads;
+/ppc                           /services/local-ads;
+/email-marketing               /services/email-sms;
+/branding                      /services/branding;
+/case-studies                  /results;
+/portfolio                     /results;
+/testimonials                  /results;
+/privacy-policy                /privacy;
+/terms-and-conditions          /terms;
+/terms-of-use                  /terms;
+/free-audit                    /local-visibility-checkup;
+/free-seo-audit                /local-visibility-checkup;

@@ -1,0 +1,20 @@
+{
+  "_comment": "Shared fixtures: tests/tier.test.ts and api/tests/run.php both assert these.",
+  "cases": [
+    { "suburb": "Coburg", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "coburg north 3058", "state": "vic", "tier": "melbourne" },
+    { "suburb": "Melbourne CBD", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "St Kilda", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "Mt Martha", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "Tarneit, VIC", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "Pakenham", "state": "VIC", "tier": "melbourne" },
+    { "suburb": "Geelong", "state": "VIC", "tier": "regional_vic" },
+    { "suburb": "Ballarat", "state": "VIC", "tier": "regional_vic" },
+    { "suburb": "Bendigo", "state": "VIC", "tier": "regional_vic" },
+    { "suburb": "Torquay", "state": "VIC", "tier": "regional_vic" },
+    { "suburb": "Sydney", "state": "NSW", "tier": "remote" },
+    { "suburb": "Richmond", "state": "NSW", "tier": "remote" },
+    { "suburb": "Brisbane", "state": "QLD", "tier": "remote" },
+    { "suburb": "Richmond", "state": "VIC", "tier": "melbourne" }
+  ]
+}
