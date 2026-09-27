@@ -1,6 +1,6 @@
 import { business } from '../data/business';
 import { packages, customPackage } from '../data/packages';
-import { services } from '../data/services';
+import { channelOf, services, SERVICE_GROUPS } from '../data/services';
 import { industries } from '../data/industries';
 import { locations } from '../data/locations';
 import { caseStudies } from '../data/caseStudies';
@@ -71,7 +71,17 @@ export default function Home() {
         </ul>
       </Section>
 
-      <Section id="how" title="Found. Trusted. Chosen." tone="muted" intro={<p>How we help local customers pick you, in three steps.</p>}>
+      <Section
+        id="how"
+        title="Found. Trusted. Chosen."
+        tone="muted"
+        intro={
+          <p>
+            We start by understanding your business: your strengths, weaknesses, long-term goals and short-term objectives. Then we
+            help local customers find you, trust you and choose you, in three steps.
+          </p>
+        }
+      >
         <ol className="steps-grid">
           <li className="step-card">
             <span className="step-number" aria-hidden="true">
@@ -121,8 +131,29 @@ export default function Home() {
         </p>
       </Section>
 
-      <Section id="services" title="Everything your business needs to win locally." tone="muted">
-        <CardGrid cta="home_service_card" items={services.map((s) => ({ href: `/services/${s.slug}`, title: s.name, body: s.cardSummary }))} />
+      <Section
+        id="services"
+        title="Everything your business needs to win locally."
+        tone="muted"
+        intro={
+          <p>
+            Complete marketing and communication solutions, online and offline. Your customers see you on Google, on social
+            media, in their letterbox, on the street and at local events, so we make every one of those moments work together.
+          </p>
+        }
+      >
+        {SERVICE_GROUPS.map((g) => (
+          <div key={g.channel} className="service-group">
+            <h3 className="service-group-title">{g.title}</h3>
+            <p className="service-group-intro">{g.intro}</p>
+            <CardGrid
+              cta="home_service_card"
+              items={services
+                .filter((s) => channelOf(s) === g.channel)
+                .map((s) => ({ href: `/services/${s.slug}`, title: s.name, body: s.cardSummary }))}
+            />
+          </div>
+        ))}
       </Section>
 
       <Section

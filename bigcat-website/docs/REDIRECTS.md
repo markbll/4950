@@ -2,6 +2,8 @@
 
 File: [`deploy/nginx/redirects.map`](../deploy/nginx/redirects.map) — `map $uri $bigcat_redirect` in Nginx; also honoured by `npm run preview`.
 
+> **Finding (Sept 2026 snapshot):** the current bigcatmarketing.com.au is a **single page**. Only `/` (and `/index.html`) exist; its menu uses on-page anchors (`#about`, `#services`, `#contact`), which browsers never send to the server and which need no redirects. `/` and `/index.html` are covered by the new site. The candidate lines below are harmless safety nets for old links from elsewhere.
+>
 > **Status: CANDIDATES ONLY.** The current production site could not be crawled when this map was drafted (network access to it was blocked from the build environment). Every line is a common legacy path, not a confirmed URL. It **must** be finalised before cutover.
 
 ## How to finalise

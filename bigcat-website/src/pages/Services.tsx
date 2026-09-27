@@ -1,5 +1,5 @@
 import { getPackage, formatPrice } from '../data/packages';
-import { getService, services } from '../data/services';
+import { channelOf, getService, services, SERVICE_GROUPS } from '../data/services';
 import { getIndustry } from '../data/industries';
 import type { RouteDef } from '../routes';
 import { CardGrid, Checklist, CheckupButton, ClosingCta, FaqList, PageHero, Section, SecondaryButton } from '../components/Blocks';
@@ -9,13 +9,19 @@ export function ServicesIndex({ route }: { route: RouteDef }) {
     <>
       <PageHero crumbs={route.breadcrumbs} eyebrow="Services" title="Everything your business needs to win locally">
         <p>
-          Every service is built around one goal: helping people nearby find you, trust you and choose you. Most are included in our{' '}
-          <a href="/packages">monthly packages</a>.
+          Complete marketing and communication solutions, online and offline, built around one goal: helping people nearby find
+          you, trust you and choose you. Many are included in our <a href="/packages">monthly packages</a>; the rest are quoted
+          to suit your business.
         </p>
       </PageHero>
-      <Section id="all-services" title="Our local marketing services">
-        <CardGrid cta="services_card" items={services.map((s) => ({ href: `/services/${s.slug}`, title: s.name, body: s.cardSummary }))} />
-      </Section>
+      {SERVICE_GROUPS.map((g, i) => (
+        <Section key={g.channel} id={`services-${g.channel}`} title={g.title} tone={i % 2 ? 'muted' : 'default'} intro={<p>{g.intro}</p>}>
+          <CardGrid
+            cta="services_card"
+            items={services.filter((s) => channelOf(s) === g.channel).map((s) => ({ href: `/services/${s.slug}`, title: s.name, body: s.cardSummary }))}
+          />
+        </Section>
+      ))}
       <ClosingCta location="services" />
     </>
   );
@@ -27,6 +33,8 @@ const pkgLabel = (p: string[] | 'custom') =>
 export function ServiceDetail({ route }: { route: RouteDef }) {
   const s = getService(route.slug!)!;
   const pkg = getPackage(s.relatedPackage)!;
+  // Offline services (and any service only available as a custom quote) are not bundled into a monthly package.
+  const quoted = channelOf(s) === 'offline' || s.inclusions.every((i) => i.packages === 'custom');
   return (
     <>
       <PageHero crumbs={route.breadcrumbs} eyebrow={s.name} title={s.heroTitle}>
@@ -92,11 +100,19 @@ export function ServiceDetail({ route }: { route: RouteDef }) {
       <section className="section" aria-labelledby="related-package-heading">
         <div className="container related-package">
           <h2 id="related-package-heading" className="section-title">
-            Start with {pkg.name}: {pkg.theme}
+            {quoted ? `Pairs well with ${pkg.name}: ${pkg.theme}` : `Start with ${pkg.name}: ${pkg.theme}`}
           </h2>
-          <p>
-            {s.name} is part of our {pkg.name} package from {formatPrice(pkg.priceMonthly)}/month + GST. {pkg.bestFor}
-          </p>
+          {quoted ? (
+            <p>
+              {s.name} is quoted to suit your business and budget. Production, printing, media and event costs are always
+              agreed up front and billed separately, like ad spend. It works best alongside our {pkg.name} package from{' '}
+              {formatPrice(pkg.priceMonthly)}/month + GST, so your offline and online marketing point to the same place.
+            </p>
+          ) : (
+            <p>
+              {s.name} is part of our {pkg.name} package from {formatPrice(pkg.priceMonthly)}/month + GST. {pkg.bestFor}
+            </p>
+          )}
           <div className="actions">
             <SecondaryButton href={`/packages/${pkg.slug}`} cta={`service_${s.slug}_package`}>
               See the {pkg.name} package

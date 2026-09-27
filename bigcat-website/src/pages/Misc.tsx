@@ -123,12 +123,21 @@ export function About({ route }: { route: RouteDef }) {
         <div className="two-col">
           <div>
             <p>
-              {/* TODO(content): founder / team story, in the owner's own words. Do not invent history, awards or client numbers. */}
-              <Todo label="founder and team story — supplied and approved by Big Cat Marketing" />
+              At Big Cat Marketing, we believe in dreaming big. We want clients to see that there are no limits to what can be
+              achieved, no matter how big or small your business. We pride ourselves on providing exceptional service and gaining
+              a real understanding of your business goals.
             </p>
             <p>
-              We are a Melbourne-based team focused on one thing: helping small and medium-sized businesses get found by the
-              customers near them.
+              We are a Melbourne-based boutique marketing agency with a strong retail focus. We develop complete marketing
+              solutions, online and offline, so you can set objectives, measure performance and thrive in your market.
+            </p>
+            <p>
+              We want to understand your business, so we spend enough time together to get to know your strengths, weaknesses,
+              long-term goals and short-term objectives. Then we turn that into a clear plan, like a road map, and do the work.
+            </p>
+            <p>
+              {/* TODO(content): optional founder / team introduction in the owner's own words. Do not invent history, awards or client numbers. */}
+              <Todo label="optional founder/team introduction" />
             </p>
           </div>
           <ImagePlaceholder label="Big Cat Marketing team photo (Melbourne)" ratio="3-2" />
@@ -151,6 +160,14 @@ export function About({ route }: { route: RouteDef }) {
           <li className="feature">
             <h3>Local first</h3>
             <p>Every plan starts with where your customers are and how they search.</p>
+          </li>
+          <li className="feature">
+            <h3>Online and offline</h3>
+            <p>Search, social and email alongside print, signage, PR, local media, events and in-store activity.</p>
+          </li>
+          <li className="feature">
+            <h3>Retail know-how</h3>
+            <p>A strong retail focus: sampling, point-of-sale, promotions and mystery shopping, not just digital.</p>
           </li>
         </ul>
       </Section>

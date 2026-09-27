@@ -25,25 +25,15 @@ function isActive(current: string, href: string): boolean {
   return current === href || current.startsWith(`${href}/`);
 }
 
-/** Placeholder mark. TODO(asset): replace with the approved Big Cat Marketing logo. */
-function LogoMark() {
-  return (
-    <svg className="logo-mark" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true" focusable="false">
-      <rect width="48" height="48" rx="12" fill="#0A0E1A" />
-      <path d="M12 34V16l7 6h10l7-6v18c0 3-3 6-6 6H18c-3 0-6-3-6-6z" fill="#F59E0B" />
-      <circle cx="19.5" cy="28" r="2" fill="#0A0E1A" />
-      <circle cx="28.5" cy="28" r="2" fill="#0A0E1A" />
-    </svg>
-  );
-}
+/** Brand logo (vector, from the supplied Illustrator artwork). Reverse version: orange + white for dark backgrounds. */
+const LOGO_REVERSE = '/brand/logo-reverse.svg';
 
 function Header({ path }: { path: string }) {
   return (
     <header className="site-header">
       <div className="container header-inner">
         <a className="brand" href="/" aria-label={`${business.name} — home`}>
-          <LogoMark />
-          <span className="brand-name">{business.name}</span>
+          <img className="brand-logo" src={LOGO_REVERSE} alt="" width="58" height="57" decoding="async" />
         </a>
         <nav id="site-nav" className="site-nav" aria-label="Main">
           <ul>
@@ -98,6 +88,7 @@ function Footer() {
     <footer className="site-footer">
       <div className="container footer-grid">
         <section className="footer-col footer-about" aria-labelledby="footer-nap-heading">
+          <img className="footer-logo" src={LOGO_REVERSE} alt={business.name} width="96" height="94" loading="lazy" decoding="async" />
           <h2 id="footer-nap-heading" className="footer-heading">
             Contact details
           </h2>

@@ -1,6 +1,6 @@
 /* ==========================================================================
    Big Cat Marketing — global styles
-   Palette: Near Black #0A0E1A, Navy #0F172A, Amber #F59E0B, White #FFFFFF,
+   Palette: Near Black #0A0E1A, Navy #0F172A, Brand Orange #F7931D (logo), White #FFFFFF,
    Cool Grey #F5F5F5, Grey #737373, Border #E5E5E5.
    Accessibility notes:
    - Amber is used for fills/accents on dark backgrounds and as a button fill
@@ -13,7 +13,7 @@
 :root {
   --near-black: #0a0e1a;
   --navy: #0f172a;
-  --amber: #f59e0b;
+  --amber: #f7931d; /* Big Cat brand orange (from logo artwork) */
   --amber-dark: #b45309; /* AA on white for large accents only */
   --white: #ffffff;
   --cool-grey: #f5f5f5;
@@ -181,10 +181,10 @@ main:focus {
 .btn-primary {
   background: var(--amber);
   color: var(--near-black);
-  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.25);
+  box-shadow: 0 6px 16px rgba(247, 147, 29, 0.25);
 }
 .btn-primary:hover {
-  background: #fbbf24;
+  background: #f9a847;
 }
 .btn-secondary {
   background: var(--white);
@@ -238,8 +238,21 @@ main:focus {
   font-size: 1.125rem;
   margin-right: auto;
 }
-.brand-name {
-  white-space: nowrap;
+.brand-logo {
+  display: block;
+  width: 58px;
+  height: auto;
+}
+@media (min-width: 1080px) {
+  .brand-logo {
+    width: 66px;
+  }
+}
+.footer-logo {
+  display: block;
+  width: 96px;
+  height: auto;
+  margin-bottom: 1.25rem;
 }
 .header-actions {
   display: flex;
@@ -413,7 +426,7 @@ main:focus {
 
 /* ---------- Hero ---------- */
 .hero {
-  background: radial-gradient(1200px 500px at 85% -10%, rgba(245, 158, 11, 0.18), transparent 60%), var(--near-black);
+  background: radial-gradient(1200px 500px at 85% -10%, rgba(247, 147, 29, 0.18), transparent 60%), var(--near-black);
   color: var(--white);
   padding: clamp(3rem, 8vw, 6rem) 0;
 }
@@ -552,6 +565,17 @@ main:focus {
 .section-muted .card,
 .section-muted .step-card {
   background: var(--white);
+}
+.service-group + .service-group {
+  margin-top: 2.5rem;
+}
+.service-group-title {
+  font-size: 1.35rem;
+  margin-bottom: 0.25rem;
+}
+.service-group-intro {
+  color: var(--text-muted);
+  margin-bottom: 0;
 }
 .card-title {
   font-size: 1.2rem;
@@ -692,7 +716,7 @@ main:focus {
   height: 1.1rem;
   border-radius: 50%;
   background: var(--near-black)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23F59E0B' stroke-width='2.4' d='M4 8.5l2.5 2.5L12 5.5'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23F7931D' stroke-width='2.4' d='M4 8.5l2.5 2.5L12 5.5'/%3E%3C/svg%3E")
     center / 75% no-repeat;
 }
 @media (min-width: 800px) {

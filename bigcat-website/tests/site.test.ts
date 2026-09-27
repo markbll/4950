@@ -12,7 +12,9 @@ import { buildGraph, faqsForRoute } from '../src/seo/schema';
 const REQUIRED_ROUTES = `/ /packages /packages/bronze /packages/silver /packages/gold
 /services /services/local-seo /services/google-business-profile /services/reviews
 /services/websites /services/local-ads /services/social-media /services/content
-/services/email-sms /services/branding /services/campaigns
+/services/email-sms /services/branding /services/campaigns /services/strategy
+/services/print-direct-mail /services/signage-outdoor /services/public-relations
+/services/events-experiential /services/mystery-shopping
 /industries /industries/trades /industries/professional-services
 /industries/health-beauty /industries/hospitality /industries/retail /industries/property
 /locations /locations/melbourne

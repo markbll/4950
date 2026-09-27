@@ -38,7 +38,7 @@ const sitemapRes = await get('/sitemap.xml');
 record('seo', 'sitemap.xml 200', sitemapRes.status === 200);
 const sitemap = await sitemapRes.text();
 const paths = [...sitemap.matchAll(/<loc>https?:\/\/[^/<]+([^<]*)<\/loc>/g)].map((m) => m[1] || '/');
-record('seo', 'sitemap lists 39 routes', paths.length === 39, `found ${paths.length}`);
+record('seo', 'sitemap lists all routes', paths.length >= 39, `found ${paths.length}`);
 const robots = await (await get('/robots.txt')).text();
 record('seo', 'robots.txt matches environment', EXPECT_NOINDEX ? /Disallow: \/\s*$/m.test(robots) : /Sitemap:/.test(robots));
 

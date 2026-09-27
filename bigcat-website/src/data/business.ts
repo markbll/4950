@@ -72,9 +72,9 @@ export const business: Business = {
   abn: '49 514 253 509',
   tagline: "Melbourne's local marketing team for small business.",
   description:
-    'Big Cat Marketing is a Melbourne-based local marketing team for small and medium-sized businesses. We help businesses show up on Google Maps, in local search and across their community, working in person or by video across Greater Melbourne and remotely Australia-wide.',
+    'Big Cat Marketing is a Melbourne-based boutique marketing agency with a strong retail focus. We develop complete marketing solutions for small and medium-sized businesses, online and offline, so you can set objectives, measure performance and thrive in your market. We work in person or by video across Greater Melbourne and remotely Australia-wide.',
   url: siteConfig.siteUrl,
-  logoPath: '/logo.png', // TODO(fact): replace public/logo.png with the approved brand logo
+  logoPath: '/logo.png', // brand logo (colour) on white, 512×512
   phone: { display: '0418 58 32 38', e164: '+61418583238' }, // must match Google Business Profile exactly
   email: 'info@bigcatmarketing.com.au',
   address: {

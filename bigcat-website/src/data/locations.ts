@@ -122,7 +122,7 @@ export const locations: Location[] = [
       'Short decision windows — “open now” and “near me” searches',
       'Apartment and laneway addresses that are hard to find without clear directions',
     ],
-    relevantServices: ['google-business-profile', 'reviews', 'social-media', 'content'],
+    relevantServices: ['google-business-profile', 'reviews', 'social-media', 'content', 'events-experiential'],
     commonIndustries: ['hospitality', 'retail', 'professional-services', 'health-beauty'],
     faqs: [
       {
@@ -166,7 +166,7 @@ export const locations: Location[] = [
       'Trades competing with lead-generation sites',
       'Suburbs with similar names or overlapping boundaries',
     ],
-    relevantServices: ['local-seo', 'google-business-profile', 'reviews', 'local-ads'],
+    relevantServices: ['local-seo', 'google-business-profile', 'reviews', 'local-ads', 'signage-outdoor'],
     commonIndustries: ['trades', 'hospitality', 'retail', 'health-beauty'],
     faqs: [
       {
@@ -254,7 +254,7 @@ export const locations: Location[] = [
       'Long, narrow service areas along the coastline',
       'Distinguishing neighbouring village strips',
     ],
-    relevantServices: ['google-business-profile', 'local-seo', 'campaigns', 'local-ads'],
+    relevantServices: ['google-business-profile', 'local-seo', 'campaigns', 'local-ads', 'signage-outdoor'],
     commonIndustries: ['trades', 'hospitality', 'health-beauty', 'property'],
     faqs: [
       {
@@ -342,7 +342,7 @@ export const locations: Location[] = [
       'Large service areas with long travel times',
       'Being early without spreading your budget too thin',
     ],
-    relevantServices: ['google-business-profile', 'local-seo', 'local-ads', 'campaigns'],
+    relevantServices: ['google-business-profile', 'local-seo', 'local-ads', 'campaigns', 'print-direct-mail'],
     commonIndustries: ['trades', 'health-beauty', 'retail', 'property'],
     faqs: [
       {
@@ -386,7 +386,7 @@ export const locations: Location[] = [
       'Competition from Melbourne businesses advertising into the region',
       'Seasonal tourism affecting demand',
     ],
-    relevantServices: ['google-business-profile', 'reviews', 'local-seo', 'social-media'],
+    relevantServices: ['google-business-profile', 'reviews', 'local-seo', 'social-media', 'public-relations'],
     commonIndustries: ['hospitality', 'trades', 'retail', 'health-beauty'],
     faqs: [
       {

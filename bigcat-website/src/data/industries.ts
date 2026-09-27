@@ -63,6 +63,8 @@ export const industries: Industry[] = [
       { service: 'reviews', why: 'A simple way to ask for reviews straight after each job.' },
       { service: 'local-seo', why: 'Service-area pages for the regions you want more work in.' },
       { service: 'local-ads', why: 'Local Services Ads and Google Ads where eligible, targeted to your area.' },
+      { service: 'signage-outdoor', why: 'Vehicle graphics and job-site signs turn every van, ute and project into local advertising.' },
+      { service: 'print-direct-mail', why: 'Letterbox drops and fridge magnets in the streets around your current jobs.' },
     ],
     faqs: [
       {
@@ -112,6 +114,9 @@ export const industries: Industry[] = [
       { service: 'local-seo', why: 'Service pages that match how clients search.' },
       { service: 'reviews', why: 'Compliant ways to gather client feedback where permitted.' },
       { service: 'social-media', why: 'LinkedIn and Facebook posts that keep you front of mind.' },
+      { service: 'strategy', why: 'A clear annual plan so marketing time is spent where it pays off.' },
+      { service: 'public-relations', why: 'Expert commentary and media releases in local and industry publications.' },
+      { service: 'events-experiential', why: 'Seminars, workshops and community sponsorships that build trust in person.' },
     ],
     faqs: [
       {
@@ -161,6 +166,8 @@ export const industries: Industry[] = [
       { service: 'reviews', why: 'Review programs that respect health advertising rules where they apply.' },
       { service: 'email-sms', why: 'Reminders and rebooking campaigns for existing clients.' },
       { service: 'social-media', why: 'Regular posts that show your space, team and expertise.' },
+      { service: 'events-experiential', why: 'Open days, workshops and local sponsorships that bring people through the door.' },
+      { service: 'print-direct-mail', why: 'Appointment cards, brochures and local letterbox campaigns for new clinics.' },
     ],
     faqs: [
       {
@@ -210,6 +217,9 @@ export const industries: Industry[] = [
       { service: 'reviews', why: 'Thoughtful replies to every review.' },
       { service: 'social-media', why: 'Posts that show specials, events and atmosphere.' },
       { service: 'campaigns', why: 'Seasonal menus, events and openings promoted across channels.' },
+      { service: 'public-relations', why: 'Launch stories, food writers, local papers and photo opportunities.' },
+      { service: 'print-direct-mail', why: 'Menus, flyers and loyalty cards that look as good as the food.' },
+      { service: 'events-experiential', why: 'Tastings, sampling and community events that get people talking.' },
     ],
     faqs: [
       {
@@ -235,7 +245,7 @@ export const industries: Industry[] = [
     cardSummary: 'Independent shops, boutiques, garden centres and showrooms.',
     heroTitle: 'Give nearby shoppers a reason to walk through your door.',
     heroBody:
-      'Shoppers often check online before they visit: is it open, do they stock it, is it worth the trip? We help independent retailers answer those questions clearly.',
+      'Big Cat Marketing is a boutique agency with a strong retail focus. Shoppers check online before they visit, then decide in store. We help you win at both: in search and social, and on the shop floor with sampling, point-of-sale, promotions and mystery shopping.',
     intro: [
       'Independent retailers compete with big chains and online stores. Local visibility, personality and service are where you win.',
       'Keeping your profile, products and social current — and giving locals reasons to return — turns browsers into regulars.',
@@ -259,6 +269,10 @@ export const industries: Industry[] = [
       { service: 'social-media', why: 'New stock, events and behind-the-scenes posts.' },
       { service: 'email-sms', why: 'Offers and news for your regular customers.' },
       { service: 'branding', why: 'A consistent look across shopfront, bags, site and social.' },
+      { service: 'events-experiential', why: 'Product sampling, demonstrations and in-store activations.' },
+      { service: 'print-direct-mail', why: 'Catalogues, point-of-sale, shelf talkers and letterbox drops.' },
+      { service: 'mystery-shopping', why: 'See your store the way customers do and lift the in-store experience.' },
+      { service: 'signage-outdoor', why: 'Shopfront, window and in-store signage that stops people walking past.' },
     ],
     faqs: [
       {
@@ -308,6 +322,8 @@ export const industries: Industry[] = [
       { service: 'reviews', why: 'A process for asking every happy vendor, buyer or landlord.' },
       { service: 'local-ads', why: 'Appraisal and property management campaigns in target areas.' },
       { service: 'campaigns', why: 'Seasonal listing and appraisal campaigns.' },
+      { service: 'print-direct-mail', why: 'Letterbox campaigns and appraisal postcards for your target suburbs.' },
+      { service: 'signage-outdoor', why: 'Board, vehicle and office signage that builds suburb-by-suburb recognition.' },
     ],
     faqs: [
       {

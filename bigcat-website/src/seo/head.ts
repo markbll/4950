@@ -12,7 +12,7 @@ export interface HeadData {
   jsonLd: unknown;
 }
 
-export const OG_IMAGE_PATH = '/og-default.png'; // TODO(asset): replace with approved branded share image (1200×630)
+export const OG_IMAGE_PATH = '/og-default.png'; // built from the brand logo by scripts/generate-brand-images.mjs
 
 export function headFor(route: RouteDef): HeadData {
   const title = fullTitle(route);

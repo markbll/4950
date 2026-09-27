@@ -1,5 +1,5 @@
 import { customPackage, formatPrice, getPackage, GST_NOTE, packages } from '../data/packages';
-import { getService } from '../data/services';
+import { channelOf, getService, services } from '../data/services';
 import type { RouteDef } from '../routes';
 import { Checklist, CheckupButton, ClosingCta, FaqList, PackageCard, PageHero, Section } from '../components/Blocks';
 
@@ -73,6 +73,31 @@ export function PackagesIndex({ route }: { route: RouteDef }) {
           </a>
         </div>
       </section>
+      <Section
+        id="add-ons"
+        title="Add traditional and offline marketing"
+        intro={
+          <p>
+            Every package can be combined with offline marketing, quoted to suit your business. Printing, media, signage
+            production and event costs are always agreed up front and billed separately, just like ad spend.
+          </p>
+        }
+      >
+        <ul className="card-grid">
+          {services
+            .filter((sv) => channelOf(sv) === 'offline')
+            .map((sv) => (
+              <li key={sv.slug} className="card card-link">
+                <h3 className="card-title">
+                  <a href={`/services/${sv.slug}`} data-cta="packages_addon">
+                    {sv.name}
+                  </a>
+                </h3>
+                <p>{sv.cardSummary}</p>
+              </li>
+            ))}
+        </ul>
+      </Section>
       <Section id="promise" title="What we will — and won't — promise" tone="muted">
         <p>
           We will do the work, show you what we did and report honestly on what changed. We will not promise rankings, Map Pack
