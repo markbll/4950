@@ -55,7 +55,16 @@ jobs:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
         run: |
+          if [ -n "$APP_SECRET" ] && [ ${#APP_SECRET} -lt 32 ]; then
+            echo "::error title=APP_SECRET too short::APP_SECRET is ${#APP_SECRET} characters; it must be at least 32 (64 recommended). Update the secret and re-run. The website forms stay disabled until this is fixed."
+            exit 1
+          fi
+          if [ -n "$APP_SECRET" ] && printf '%s' "$APP_SECRET" | grep -q '[[:space:]#]'; then
+            echo "::error title=APP_SECRET invalid::APP_SECRET must not contain spaces or '#'. Use letters and numbers only."
+            exit 1
+          fi
           missing=""
           [ -n "$FTP_SERVER" ]   || missing="$missing FTP_SERVER"
           [ -n "$FTP_USERNAME" ] || missing="$missing FTP_USERNAME"
