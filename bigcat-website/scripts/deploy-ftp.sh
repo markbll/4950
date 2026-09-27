@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # Deploy a built release to cPanel/FTP hosting over FTPS (TLS required).
 #
-#   FTP_HOST=ftp.bigcatgroup.com.au FTP_USER='website@bigcatmarketing.com.au' \
+#   FTP_HOST=sh-cp2-au.yyz2.servername.online FTP_USER='website@bigcatmarketing.com.au' \
 #     ./scripts/deploy-ftp.sh staging
 #
 # - The password is read from $FTP_PASS if set, otherwise prompted (hidden).

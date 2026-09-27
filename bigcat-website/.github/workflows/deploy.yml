@@ -1,7 +1,7 @@
 # Build, test and FTP-deploy the site to cPanel on every push to main.
 #
 # Required repository secrets (Settings → Secrets and variables → Actions → Secrets):
-#   FTP_SERVER     e.g. ftp.bigcatgroup.com.au
+#   FTP_SERVER     e.g. sh-cp2-au.yyz2.servername.online
 #   FTP_USERNAME   e.g. website@bigcatmarketing.com.au
 #   FTP_PASSWORD   the FTP account password
 #

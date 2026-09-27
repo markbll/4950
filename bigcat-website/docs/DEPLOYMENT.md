@@ -22,7 +22,7 @@ The action keeps a sync-state file on the server, so later runs upload only what
 
 | Secret | Value |
 |---|---|
-| `FTP_SERVER` | `ftp.bigcatgroup.com.au` |
+| `FTP_SERVER` | `sh-cp2-au.yyz2.servername.online` |
 | `FTP_USERNAME` | `website@bigcatmarketing.com.au` |
 | `FTP_PASSWORD` | the (rotated) FTP password |
 | `APP_SECRET` *(optional)* | `openssl rand -hex 32` |
@@ -81,7 +81,7 @@ RATE_LIMIT_SCALE=10
 ```bash
 npm ci && npm run lint && npm test
 VITE_SITE_ENV=staging npm run build
-FTP_HOST=ftp.bigcatgroup.com.au FTP_USER='website@bigcatmarketing.com.au' \
+FTP_HOST=sh-cp2-au.yyz2.servername.online FTP_USER='website@bigcatmarketing.com.au' \
   ENV_FILE=~/bigcat-staging.env npm run deploy:staging      # prompts for the password
 ```
 
@@ -92,7 +92,7 @@ The script ([`scripts/deploy-ftp.sh`](../scripts/deploy-ftp.sh), needs `lftp`) d
 3. It creates `_private/` with a deny-all `.htaccess` and uploads your env file as `_private/bigcat.env` (mode 600).
 4. It refuses to push a production build to staging, and refuses production at all unless `CONFIRM_PRODUCTION=yes`.
 
-FTP server: `ftp.bigcatgroup.com.au`, port 21, explicit FTPS (the script's default). If lftp reports a certificate name mismatch, use the server hostname cPanel shows under FTP Accounts → Configure FTP Client. Don't turn certificate checks off.
+FTP server: `sh-cp2-au.yyz2.servername.online` (the hosting server's own name — its TLS certificate is issued for that name, so `ftp.bigcatgroup.com.au` fails certificate checks even though it is the same server, 66.102.132.28), port 21, explicit FTPS (the script's default). If lftp reports a certificate name mismatch, use the server hostname cPanel shows under FTP Accounts → Configure FTP Client. Don't turn certificate checks off.
 
 **Verify**
 
