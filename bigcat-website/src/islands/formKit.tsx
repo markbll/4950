@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Errors } from '../lib/validation';
 import { getUtm } from '../lib/analytics';
+import { business } from '../data/business';
 
 export interface ApiResult<T = unknown> {
   ok: boolean;
@@ -17,11 +18,21 @@ interface TokenState {
 /** Server rejects tokens younger than 2s (bot timing check). */
 const TOKEN_MIN_AGE_MS = 2100;
 
+/** The form service itself is down or misconfigured (not the visitor's connection). */
+class FormServiceError extends Error {}
+
+function unavailableMessage(): string {
+  const ways = [business.phone ? `call ${business.phone.display}` : '', business.email ? `email ${business.email}` : '']
+    .filter(Boolean)
+    .join(' or ');
+  return `Our online forms are temporarily unavailable. Sorry about that${ways ? ` — please ${ways} instead` : ''}.`;
+}
+
 async function fetchToken(ref: TokenState): Promise<void> {
   const res = await fetch('/api/token.php', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-  if (!res.ok) throw new Error('token');
-  const json = (await res.json()) as { token?: string };
-  if (!json.token) throw new Error('token');
+  if (!res.ok) throw new FormServiceError(`token ${res.status}`);
+  const json = (await res.json().catch(() => ({}))) as { token?: string };
+  if (!json.token) throw new FormServiceError('token missing');
   ref.current = json.token;
   ref.issuedAt = Date.now();
 }
@@ -55,6 +66,10 @@ export async function postJson<T>(endpoint: string, payload: Record<string, unkn
       body: JSON.stringify({ ...payload, utm: getUtm() }),
     });
     const json = (await res.json().catch(() => ({}))) as ApiResult<T>;
+    if (res.status === 503 || (res.status >= 500 && !json.message)) {
+      tokenRef.current = null;
+      return { ok: false, message: unavailableMessage() };
+    }
     if (res.status === 429) {
       return { ok: false, message: 'Too many attempts. Please wait a few minutes and try again.' };
     }
@@ -63,8 +78,9 @@ export async function postJson<T>(endpoint: string, payload: Record<string, unkn
       return { ok: false, errors: json.errors, message: json.message ?? 'Something went wrong. Please try again.' };
     }
     return json;
-  } catch {
-    return { ok: false, message: 'We could not send your details. Please check your connection and try again.' };
+  } catch (err) {
+    if (err instanceof FormServiceError) return { ok: false, message: unavailableMessage() };
+    return { ok: false, message: 'We could not send your details. Please check your internet connection and try again.' };
   }
 }
 

@@ -138,4 +138,9 @@ jobs:
         continue-on-error: true
         run: |
           sleep 5
-          curl -fsS --max-time 20 "https://${SITE_HOST}/api/health.php" || echo "::warning::health.php not OK (password-protected staging returns 401 — check it in a browser)"
+          code=$(curl -sS --max-time 20 -o health.json -w '%{http_code}' "https://${SITE_HOST}/api/health.php" || echo 000)
+          echo "HTTP $code"; cat health.json 2>/dev/null; echo
+          if [ "$code" = 200 ]; then echo "✔ API healthy"; exit 0; fi
+          if [ "$code" = 401 ]; then echo "::warning::Staging is password-protected (401) — open /api/health.php in a browser to check it."; exit 0; fi
+          echo "::error title=API health check failed (HTTP $code)::See the JSON above: any check that is false needs fixing. secret_configured/storage_writable → _private/bigcat.env; mail_configured → SMTP_HOST/SMTP_PASS secrets."
+          exit 1
