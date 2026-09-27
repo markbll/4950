@@ -68,11 +68,50 @@ function send_team_mail(MailMessage $msg): bool
         $headers['Reply-To'] = "<$replyTo>";
     }
 
-    return match (env('MAIL_TRANSPORT', 'smtp')) {
+    $transport = env('MAIL_TRANSPORT', 'smtp');
+    $GLOBALS['bigcat_smtp_error'] = null;
+    $via = $transport;
+    $ok = match ($transport) {
         'smtp' => smtp_send($from, $to, $headers, $body),
         'log' => log_send($headers, $body),
         default => php_mail_send($to, $subject, $headers, $body, $from),
     };
+    // SMTP failed (blocked port, certificate, login...): fall back to the host's own mailer
+    // (PHP mail() → local Exim on cPanel) unless MAIL_FALLBACK=none. Log transport stays log.
+    $fallback = env('MAIL_FALLBACK', 'mail');
+    if (!$ok && $transport === 'smtp' && $fallback !== 'none') {
+        $via = $fallback === 'log' ? 'log' : 'mail';
+        $ok = $via === 'log' ? log_send($headers, $body) : php_mail_send($to, $subject, $headers, $body, $from);
+    }
+    record_mail_status($ok, $via, $GLOBALS['bigcat_smtp_error'] ?? null);
+    return $ok;
+}
+
+/** Remember the last send result (no addresses or content) so health.php can report it. */
+function record_mail_status(bool $ok, string $via, ?string $smtpError): void
+{
+    $dir = storage_dir();
+    if ($dir === null) {
+        return;
+    }
+    @file_put_contents($dir . '/mail-status.json', json_encode([
+        'ok' => $ok,
+        'via' => $via,
+        'smtp_error' => $smtpError,
+        'at' => gmdate('c'),
+    ]));
+}
+
+/** @return array<string,mixed>|null */
+function last_mail_status(): ?array
+{
+    $dir = storage_dir();
+    $file = $dir !== null ? $dir . '/mail-status.json' : null;
+    if ($file === null || !is_file($file)) {
+        return null;
+    }
+    $data = json_decode((string) file_get_contents($file), true);
+    return is_array($data) ? $data : null;
 }
 
 function encode_display_name(string $name): string
@@ -122,7 +161,9 @@ function smtp_send(string $from, string $to, array $headers, string $body): bool
     $errstr = '';
     $fp = @stream_socket_client($remote, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
     if ($fp === false) {
-        error_log("[bigcat-api] SMTP connect failed ($errno)");
+        // Distinguish a TLS/certificate problem from the port being blocked or unreachable.
+        $GLOBALS['bigcat_smtp_error'] = preg_match('/ssl|tls|certificate|crypto/i', $errstr) ? 'tls_certificate' : 'connect';
+        error_log("[bigcat-api] SMTP connect failed ($errno): " . substr($errstr, 0, 120));
         return false;
     }
     stream_set_timeout($fp, $timeout);
@@ -150,13 +191,16 @@ function smtp_send(string $from, string $to, array $headers, string $body): bool
     $ehloHost = preg_replace('/[^a-z0-9.-]/i', '', (string) (explode('@', $from)[1] ?? 'localhost'));
     try {
         if (!$cmd('', [220]) || !$cmd("EHLO $ehloHost", [250])) {
+            $GLOBALS['bigcat_smtp_error'] = 'greeting';
             return false;
         }
         if ($secure === 'tls') {
             if (!$cmd('STARTTLS', [220])) {
+                $GLOBALS['bigcat_smtp_error'] = 'starttls';
                 return false;
             }
-            if (!stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
+            if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
+                $GLOBALS['bigcat_smtp_error'] = 'tls_certificate';
                 error_log('[bigcat-api] SMTP STARTTLS failed');
                 return false;
             }
@@ -167,9 +211,11 @@ function smtp_send(string $from, string $to, array $headers, string $body): bool
         if (!$cmd('AUTH LOGIN', [334])
             || !$cmd(base64_encode((string) env('SMTP_USER')), [334])
             || !$cmd(base64_encode((string) env('SMTP_PASS')), [235])) {
+            $GLOBALS['bigcat_smtp_error'] = 'auth';
             return false;
         }
         if (!$cmd("MAIL FROM:<$from>", [250]) || !$cmd("RCPT TO:<$to>", [250, 251]) || !$cmd('DATA', [354])) {
+            $GLOBALS['bigcat_smtp_error'] = 'rejected';
             return false;
         }
         $h = '';
@@ -180,6 +226,7 @@ function smtp_send(string $from, string $to, array $headers, string $body): bool
         $data = preg_replace('/^\./m', '..', $data); // dot-stuffing
         fwrite($fp, $data . "\r\n.\r\n");
         if (!$cmd('', [250])) {
+            $GLOBALS['bigcat_smtp_error'] = 'rejected';
             return false;
         }
         $cmd('QUIT', [221]);

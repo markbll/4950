@@ -22,5 +22,7 @@ json_response($ok ? 200 : 503, [
     'status' => $ok ? 'ok' : 'degraded',
     'env' => app_env(),
     'checks' => $checks,
+    // Result of the most recent form email: {ok, via: smtp|mail|log, smtp_error: connect|tls_certificate|greeting|starttls|auth|rejected|null, at}
+    'last_mail' => last_mail_status(),
     'time' => gmdate('c'),
 ]);

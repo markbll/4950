@@ -134,8 +134,27 @@ $eml = (string) file_get_contents((glob($storage . '/mail-log/*.eml') ?: [''])[0
 check('no header injection in mail', !preg_match('/^Bcc:/mi', $eml));
 check('invalid reply-to dropped', !str_contains($eml, 'Reply-To'));
 
+// --- SMTP failure → fallback + status recording
+putenv('MAIL_TRANSPORT=smtp');
+putenv('SMTP_HOST=127.0.0.1');
+putenv('SMTP_PORT=1');            // nothing listens → connection refused
+putenv('SMTP_SECURE=tls');
+putenv('SMTP_USER=u@example.com');
+putenv('SMTP_PASS=x');
+putenv('MAIL_FALLBACK=log');
+check('smtp failure falls back and still delivers', send_team_mail(new MailMessage('Fallback test', 'Body')));
+$st = last_mail_status();
+check('mail status records fallback route', ($st['via'] ?? '') === 'log' && ($st['ok'] ?? false) === true);
+check('mail status records smtp failure stage', ($st['smtp_error'] ?? '') === 'connect');
+check('mail status holds no addresses', !str_contains((string) json_encode($st), '@'));
+putenv('MAIL_FALLBACK=none');
+check('fallback can be disabled', send_team_mail(new MailMessage('No fallback', 'Body')) === false);
+check('status records failure', (last_mail_status()['ok'] ?? true) === false);
+putenv('MAIL_TRANSPORT=log');
+putenv('MAIL_FALLBACK');
+
 // --- env file discovery (separate processes: config caches its first load)
-$php = "env -u APP_SECRET -u STORAGE_DIR -u APP_ENV " . escapeshellarg(PHP_BINARY);
+$php = "env -u APP_SECRET -u STORAGE_DIR -u APP_ENV -u SMTP_PASS -u MAIL_FROM_NAME " . escapeshellarg(PHP_BINARY);
 $locked = json_decode((string) shell_exec("$php " . escapeshellarg(__DIR__ . '/envfile.php') . ' locked'), true);
 check('env file in locked _private/ is loaded', ($locked['secret'] ?? false) === true);
 check('relative STORAGE_DIR resolves next to env file', ($locked['storage'] ?? false) === true);
