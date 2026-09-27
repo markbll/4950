@@ -14,7 +14,7 @@ Nothing in this project deploys automatically. **Production is never deployed wi
 
 1. Lint, tests (Node and PHP), then build.
 2. `npm run package` assembles `release/ftp/`.
-3. Uploads it with **SamKirkland/FTP-Deploy-Action v4.4.0** over **FTPS**, port 21, to `website.bigcatmarketing.com.au/`.
+3. Uploads it with **SamKirkland/FTP-Deploy-Action v4.4.0** over **FTPS**, port 21, to the FTP account's home folder (`./`), which is the `website.bigcatmarketing.com.au` web root.
 
 The action keeps a sync-state file on the server, so later runs upload only what changed. It only ever deletes files it uploaded itself. `.well-known/`, `cgi-bin/`, `.ftpquota`, `.user.ini` and `_private/storage/` are always left alone.
 

@@ -13,7 +13,7 @@
 #
 # Optional repository variables (Settings → … → Variables):
 #   SITE_ENV        staging (default) | production — production is indexable and needs the domain switched
-#   FTP_SERVER_DIR  remote root folder, must end with "/" (default: website.bigcatmarketing.com.au/)
+#   FTP_SERVER_DIR  remote folder, must end with "/" (default: ./ = the FTP account's home, which is the website.bigcatmarketing.com.au web root)
 #   FTP_SECURITY    strict (default, verify TLS certificate) | loose
 name: Deploy to cPanel
 
@@ -119,7 +119,7 @@ jobs:
           port: 21
           security: ${{ vars.FTP_SECURITY || 'strict' }}
           local-dir: ./release/ftp/
-          server-dir: ${{ vars.FTP_SERVER_DIR || 'website.bigcatmarketing.com.au/' }}
+          server-dir: ${{ vars.FTP_SERVER_DIR || './' }}
           # Host-managed files are never touched. Only files this action uploaded are ever deleted.
           exclude: |
             **/.git*
