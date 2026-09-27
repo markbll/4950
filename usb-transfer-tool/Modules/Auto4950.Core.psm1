@@ -60,6 +60,12 @@ function Get-DefaultConfig {
                                                           # Array of @{ Serial = '<VolumeSerialNumber>'; Label = '<for display>' }.
                                                           # Matched by volume serial number so it still applies if the
                                                           # drive letter changes. Managed from Setup.ps1's Kiosk Mode section.
+        KioskFastTransferEnabled = $false                # Copy from the source drive to a local drive first (Stage 1),
+                                                          # so the drive can be removed before hashing/compression/network
+                                                          # transfer (Stage 2) run. See Invoke-A4950FastPreCopy.
+        KioskFastTransferPath    = ''                    # Local folder Stage 1 copies into, e.g. 'D:\Auto4950FastTransfer'.
+                                                          # Must be on a local fixed drive - managed from Setup.ps1's
+                                                          # Kiosk Mode section (Get-A4950LocalFixedDrives populates the choices).
     }
 }
 
@@ -703,6 +709,84 @@ function Copy-A4950ToShare {
     return $result
 }
 
+function Invoke-A4950FastPreCopy {
+    <#
+    .SYNOPSIS Kiosk Mode "Fast Transfer" Stage 1: raw copy from the source drive to a local staging folder.
+    .DESCRIPTION
+        No hashing or compression happens here - it is a byte-for-byte copy,
+        done ONLY so the source drive (USB/external HDD) can be removed as
+        soon as it finishes, instead of staying connected through hashing,
+        compression and the network transfer too (Stage 2 - unchanged, runs
+        against this function's DestinationPath via the normal
+        Invoke-A4950TransferJob pipeline).
+
+        Prefers robocopy (resilient, restartable) with a recursive Copy-Item
+        fallback, same pattern as Copy-A4950ToShare. Progress is reported via
+        -OnProgress by polling the destination folder's cumulative size
+        against the source's total size while the copy runs - the same
+        "poll a background process's output on a timer" approach
+        New-A4950Archive's Instant transfer mode uses for volume detection.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [scriptblock]$CancelCheck,
+        [scriptblock]$OnProgress   # called with @{ CopiedBytes; TotalBytes; ElapsedSeconds }
+    )
+
+    $result = [pscustomobject]@{ Success = $false; Cancelled = $false; DestinationPath = $DestinationPath; Error = '' }
+    try {
+        if ($CancelCheck -and (& $CancelCheck)) {
+            $result.Cancelled = $true
+        } else {
+            if (-not (Test-Path -LiteralPath $DestinationPath)) {
+                New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            }
+            $totalBytes = Get-A4950PathSizeBytes -Path $SourcePath
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+            $onTick = $null
+            if ($OnProgress) {
+                $onTick = {
+                    $copied = 0
+                    try {
+                        $sum = (Get-ChildItem -LiteralPath $DestinationPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        if ($sum) { $copied = [int64]$sum }
+                    } catch {}
+                    & $OnProgress @{ CopiedBytes = $copied; TotalBytes = $totalBytes; ElapsedSeconds = $sw.Elapsed.TotalSeconds }
+                }.GetNewClosure()
+            }
+
+            $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
+            if ($robocopy) {
+                # /E = include subfolders (even empty ones), /Z = restartable mode,
+                # /J = unbuffered I/O, /R:2 /W:3 = don't hang on a flaky USB file.
+                $rcArgs = @($SourcePath, $DestinationPath, '/E', '/Z', '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
+                $run = Invoke-A4950Process -FilePath $robocopy.Source -Arguments $rcArgs -CancelCheck $CancelCheck -OnTick $onTick
+                $result.Cancelled = $run.Cancelled
+                # Robocopy exit codes 0-7 are all "success" (8+ means failure).
+                $result.Success = (-not $run.Cancelled) -and ($run.ExitCode -lt 8)
+                if (-not $result.Success -and -not $run.Cancelled) { $result.Error = "robocopy exit code $($run.ExitCode)" }
+            } else {
+                # No robocopy (non-Windows test hosts, or a locked-down machine): best-effort
+                # recursive copy. -Path (not -LiteralPath) is required here so the trailing
+                # '*' actually expands as a wildcard instead of being searched for literally.
+                Copy-Item -Path (Join-Path $SourcePath '*') -Destination $DestinationPath -Recurse -Force -ErrorAction Stop
+                if ($onTick) { & $onTick }
+                $result.Success = $true
+            }
+        }
+        if ($result.Cancelled) {
+            Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        $result.Error = $_.Exception.Message
+        $result.Success = $false
+    }
+    return $result
+}
+
 function Get-A4950UniqueName {
     <#
     .SYNOPSIS Build a destination file name that does not already exist, by
@@ -1091,6 +1175,28 @@ function Get-A4950AvailableKioskDrives {
     $blocked = @($Config.KioskBlockedDrives | ForEach-Object { $_.Serial } | Where-Object { $_ })
     if (-not $blocked.Count) { return @(Get-A4950RemovableDrives) }
     return @(Get-A4950RemovableDrives | Where-Object { $_.VolumeSerialNumber -notin $blocked })
+}
+
+function Get-A4950LocalFixedDrives {
+    <#
+    .SYNOPSIS List local fixed drives (WMI DriveType 3) - candidates for Kiosk Mode's Fast Transfer staging area.
+    .DESCRIPTION
+        Used by Setup.ps1 to populate the "local drive for the fast copy"
+        picker: only local, fixed (non-removable, non-network) drives make
+        sense as a Stage 1 destination, since the whole point is a quick
+        local copy off the source drive. Returns Win32_LogicalDisk objects
+        (DeviceID, VolumeName, FreeSpace, Size). Fails closed (empty list)
+        if WMI is unavailable, same as Get-A4950RemovableDrives.
+    #>
+    [CmdletBinding()]
+    param()
+    try {
+        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
+            Where-Object { $_.DeviceID -and $_.DriveType -eq 3 } |
+            Sort-Object DeviceID)
+    } catch {
+        return @()
+    }
 }
 
 function Write-A4950Log {

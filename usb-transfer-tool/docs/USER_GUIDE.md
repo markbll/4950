@@ -484,6 +484,10 @@ Options panels with one giant card that fills the screen.
      app's Options panel (they're shared, not Kiosk-only), so setting them
      here is enough even if Kiosk Mode is the only thing ever run on this
      PC.
+   - **Fast Transfer** - tick **Enable Fast Transfer** and pick a local
+     fixed drive from the dropdown (**Refresh** re-scans if you plug in or
+     partition a drive after opening Setup). See **Fast Transfer** below
+     for what this changes.
    Click **Save configuration** afterwards.
 
 ### Running a transfer
@@ -501,7 +505,9 @@ Options panels with one giant card that fills the screen.
    recursively, hashed, compressed and transferred - the same as adding
    that drive's root as a folder in the main app with "Select all
    folders/files by default" on. There's no folder/file picking in Kiosk
-   Mode; it's always the whole drive.
+   Mode; it's always the whole drive. If **Fast Transfer** is off (the
+   default), this all happens directly from the drive - see step 3.
+   If Fast Transfer is on, see **Fast Transfer** below instead.
 3. While running, the card turns amber and shows the current stage
    (hashing / compressing / transferring). **Do not remove the drive**
    until it finishes.
@@ -510,6 +516,28 @@ Options panels with one giant card that fills the screen.
    next drive's transfer.
 5. On failure, the card turns **red** with the reason. Tap it to reset and
    try again.
+
+### Fast Transfer
+When enabled (Setup.ps1's Kiosk Mode section), a transfer runs in two
+stages instead of reading from the source drive the whole way through:
+
+1. **Stage 1 - copy.** The card turns amber and reads **"COPYING FROM
+   DRIVE..."**, with a live percentage and an estimated time remaining
+   (e.g. "Copying from drive - 42% (about 2m remaining)"). This is a raw
+   copy only - no hashing or compression yet - straight from the source
+   drive to `<chosen local drive>\Auto4950FastTransfer\<case name>`.
+2. **Stage 1 complete.** The card turns **teal** and reads **"DRIVE SAFE TO
+   REMOVE"** - the source drive can now be disconnected.
+3. **Stage 2 - in the background.** Hashing, compression and the network
+   transfer start automatically from the local copy, with the same
+   amber "TRANSFERRING..." card as a normal job. **Cancel Transfer** works
+   during either stage.
+4. Success/failure at the end look exactly the same as a normal transfer
+   (blue "COMPLETED" / red with a reason).
+
+If Stage 1 itself fails (e.g. the local drive runs out of space), the card
+turns red and reads **"COPY FAILED"** with the reason; Stage 2 never
+starts in that case.
 
 ### Exiting / cancelling
 Kiosk Mode has no way to exit from the UI: there is no title bar or close

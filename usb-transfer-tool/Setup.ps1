@@ -143,6 +143,16 @@ $configPath = Get-ConfigPath
     </StackPanel>
     <TextBlock x:Name="BlockStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
 
+    <TextBlock Text="Fast Transfer (optional)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
+    <TextBlock Text="Copies the drive's contents to a local drive first (Stage 1 - no hashing/compression, just a fast raw copy), then hashes, compresses and sends to the network destination in the background (Stage 2). Lets the USB/external drive be removed as soon as Stage 1 finishes, instead of staying connected for the whole job." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <CheckBox x:Name="FastTransferEnabled" Content="Enable Fast Transfer" Foreground="#FFECECEC" Margin="0,0,0,8"/>
+    <TextBlock Text="Local drive for the Stage 1 copy" Foreground="#FF9AA0A6" FontSize="11"/>
+    <DockPanel Margin="0,2,0,4">
+      <Button x:Name="BtnFastDriveRefresh" Content="Refresh" DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <ComboBox x:Name="FastDrive" Padding="6" Background="#FF20202A" Foreground="#FFECECEC"/>
+    </DockPanel>
+    <TextBlock x:Name="FastTransferStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,10"/>
+
     <TextBlock Text="Notification sounds (Kiosk Mode and the main app)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
     <TextBlock Text="Optional .wav files played on the events below - leave blank for the default Windows sound. Used by Kiosk Mode and the main app's Options panel alike." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
     <TextBlock Text="Transfer started" Foreground="#FF9AA0A6" FontSize="11"/>
@@ -190,6 +200,32 @@ $g = { param($n) $w.FindName($n) }
 (& $g 'SoundStart').Text  = $config.SoundStartPath
 (& $g 'SoundFinish').Text = $config.SoundFinishPath
 (& $g 'SoundError').Text  = $config.SoundErrorPath
+
+(& $g 'FastTransferEnabled').IsChecked = [bool]$config.KioskFastTransferEnabled
+$script:FastTransferSubfolder = 'Auto4950FastTransfer'
+function Update-FastDriveChoices {
+    $currentDeviceId = if ($config.KioskFastTransferPath) { ($config.KioskFastTransferPath -split '\\')[0] } else { $null }
+    (& $g 'FastDrive').Items.Clear()
+    $drives = @(Get-A4950LocalFixedDrives)
+    foreach ($d in $drives) {
+        $freeGb = [math]::Round($d.FreeSpace / 1GB, 1)
+        $label = "{0}  {1}  ({2} GB free)" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' })), $freeGb
+        [void](& $g 'FastDrive').Items.Add($label)
+    }
+    if ((& $g 'FastDrive').Items.Count -eq 0) {
+        (& $g 'FastTransferStatus').Text = 'No local fixed drive detected to use for Fast Transfer.'
+        (& $g 'FastTransferStatus').Foreground = '#FFFFCA28'
+        return
+    }
+    (& $g 'FastTransferStatus').Text = ''
+    $preselect = 0
+    if ($currentDeviceId) {
+        for ($i = 0; $i -lt $drives.Count; $i++) { if ($drives[$i].DeviceID -eq $currentDeviceId) { $preselect = $i; break } }
+    }
+    (& $g 'FastDrive').SelectedIndex = $preselect
+}
+Update-FastDriveChoices
+(& $g 'BtnFastDriveRefresh').Add_Click({ Update-FastDriveChoices })
 
 $script:BlockedDrives = New-Object System.Collections.Generic.List[object]
 foreach ($b in @($config.KioskBlockedDrives)) {
@@ -393,6 +429,18 @@ function Show-DrivePickerDialog {
     $config.SoundFinishPath     = (& $g 'SoundFinish').Text.Trim()
     $config.SoundErrorPath      = (& $g 'SoundError').Text.Trim()
     $config.KioskBlockedDrives  = @($script:BlockedDrives | ForEach-Object { @{ Serial = $_.Serial; Label = $_.Label } })
+
+    $config.KioskFastTransferEnabled = [bool](& $g 'FastTransferEnabled').IsChecked
+    $fastSel = (& $g 'FastDrive').SelectedItem
+    if ($fastSel) {
+        $selectedDeviceId = $fastSel.ToString().Split(' ')[0]   # e.g. "D:"
+        $config.KioskFastTransferPath = Join-Path $selectedDeviceId $script:FastTransferSubfolder
+    } elseif ($config.KioskFastTransferEnabled) {
+        # Enabled but nothing to copy to - don't silently save a broken setup.
+        (& $g 'FastTransferStatus').Text = 'Fast Transfer needs a local drive selected above - it has been left disabled.'
+        (& $g 'FastTransferStatus').Foreground = '#FFEF5350'
+        $config.KioskFastTransferEnabled = $false
+    }
     Save-A4950Config -Config $config -Path $configPath | Out-Null
 
     $issues = Test-A4950Config -Config $config

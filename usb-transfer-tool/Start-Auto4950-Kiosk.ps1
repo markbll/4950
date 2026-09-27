@@ -17,6 +17,14 @@
       2. The ENTIRE selected drive is captured, hashed, compressed and
          transferred - the same as adding that drive's root as a folder in
          the main app, with "Select all folders/files by default" on.
+         If "Fast Transfer" is enabled in Setup.ps1's Kiosk Mode section,
+         this happens in two stages instead: Stage 1 copies the drive's
+         contents to a local folder (raw copy, no hashing/compression) and
+         reports an estimated time remaining as it runs; once done, the
+         card turns teal and says the drive is safe to remove, and Stage 2
+         (hash, compress, network transfer) continues automatically in the
+         background from that local copy - see Invoke-A4950FastPreCopy in
+         Core.psm1.
       3. The button turns blue and reads "COMPLETED" with the file name(s)
          that were sent, once the job finishes. Tap it again to start
          another transfer (e.g. for the next drive).
@@ -41,7 +49,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.8'
+$script:AppVersion = '6.9'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -275,29 +283,16 @@ function Start-KioskTransfer {
     $script:Shared.Config     = $config
     $script:Shared.CaseNumber = $name
     $script:Shared.DriveRoot  = $driveRoot
-    $script:Shared.Items      = @($drivePath)
     $script:Shared.Cancel     = $false
     $script:Shared.Running    = $true
     $script:Shared.LogFile    = Join-Path (Expand-A4950Path $config.StagingFolder) "$caseSafe\$caseSafe.log"
+    $ctrl.BtnExit.Visibility  = 'Visible'
 
-    $script:WorkerRs = [runspacefactory]::CreateRunspace()
-    $script:WorkerRs.ApartmentState = 'MTA'
-    $script:WorkerRs.ThreadOptions  = 'ReuseThread'
-    $script:WorkerRs.Open()
-    $script:WorkerRs.SessionStateProxy.SetVariable('Shared', $script:Shared)
-    $script:WorkerPs = [powershell]::Create()
-    $script:WorkerPs.Runspace = $script:WorkerRs
-    [void]$script:WorkerPs.AddScript({
-        param($core, $worker)
-        Import-Module $core -Force
-        Import-Module $worker -Force
-        Invoke-A4950TransferJob -Shared $Shared
-    }).AddArgument($coreModule).AddArgument($workerModule)
-    $script:WorkerHandle = $script:WorkerPs.BeginInvoke()
-
-    Set-MainCard -Bg '#FFB8860B' -Title 'TRANSFERRING...' -Subtitle $name -Detail "Source: $drivePath`nPlease wait - do not remove the drive."
-    $ctrl.BtnExit.Visibility = 'Visible'
-    Play-KioskStartSound
+    if ($config.KioskFastTransferEnabled -and $config.KioskFastTransferPath) {
+        Start-KioskFastCopyStage -DrivePath $drivePath -CaseName $name -CaseSafe $caseSafe
+    } else {
+        Start-KioskMainPipeline -SourceItems @($drivePath) -CaseName $name -DrivePath $drivePath
+    }
 }
 
 function Stop-KioskTransfer {
@@ -316,6 +311,73 @@ function Complete-KioskWorker {
 }
 
 # ----------------------------------------------------------------------------
+# Fast Transfer Stage 1: raw copy from the source drive to a local folder, so
+# the drive can be removed before Stage 2 (hash/compress/network transfer)
+# even starts. See Invoke-A4950FastPreCopy in Core.psm1.
+# ----------------------------------------------------------------------------
+function Start-KioskFastCopyStage {
+    param([Parameter(Mandatory)][string]$DrivePath, [Parameter(Mandatory)][string]$CaseName, [Parameter(Mandatory)][string]$CaseSafe)
+
+    $localDest = Join-Path $config.KioskFastTransferPath $CaseSafe
+
+    $script:WorkerRs = [runspacefactory]::CreateRunspace()
+    $script:WorkerRs.ApartmentState = 'MTA'
+    $script:WorkerRs.ThreadOptions  = 'ReuseThread'
+    $script:WorkerRs.Open()
+    $script:WorkerRs.SessionStateProxy.SetVariable('Shared', $script:Shared)
+    $script:WorkerPs = [powershell]::Create()
+    $script:WorkerPs.Runspace = $script:WorkerRs
+    [void]$script:WorkerPs.AddScript({
+        param($core, $worker, $sourcePath, $destPath)
+        Import-Module $core -Force
+        Import-Module $worker -Force
+        $cancel = ({ [bool]$Shared.Cancel }).GetNewClosure()
+        $onProgress = {
+            param($p)
+            Send-A4950Event -Shared $Shared -Type 'progress' -Data @{ Stage = 'fastcopy'; CopiedBytes = $p.CopiedBytes; TotalBytes = $p.TotalBytes; ElapsedSeconds = $p.ElapsedSeconds }
+        }.GetNewClosure()
+        $r = Invoke-A4950FastPreCopy -SourcePath $sourcePath -DestinationPath $destPath -CancelCheck $cancel -OnProgress $onProgress
+        Send-A4950Event -Shared $Shared -Type 'done' -Data @{ FastCopyStage = $true; Success = $r.Success; Cancelled = $r.Cancelled; Error = $r.Error; DestinationPath = $destPath }
+    }).AddArgument($coreModule).AddArgument($workerModule).AddArgument($DrivePath).AddArgument($localDest)
+    $script:WorkerHandle = $script:WorkerPs.BeginInvoke()
+
+    Set-MainCard -Bg '#FFB8860B' -Title 'COPYING FROM DRIVE...' -Subtitle 'Estimating time remaining...' -Detail "$CaseName`nPlease wait - do not remove the drive yet."
+    Play-KioskStartSound
+}
+
+# ----------------------------------------------------------------------------
+# Stage 2 (or the only stage, when Fast Transfer is off): hash, compress and
+# transfer to the network destination - unchanged from before, just now
+# reusable for either the original drive path or a Fast Transfer local copy.
+# ----------------------------------------------------------------------------
+function Start-KioskMainPipeline {
+    param([Parameter(Mandatory)][string[]]$SourceItems, [Parameter(Mandatory)][string]$CaseName, [string]$DrivePath, [switch]$FromLocalCopy)
+
+    $script:Shared.Items   = @($SourceItems)
+    $script:Shared.Cancel  = $false
+    $script:Shared.Running = $true
+
+    $script:WorkerRs = [runspacefactory]::CreateRunspace()
+    $script:WorkerRs.ApartmentState = 'MTA'
+    $script:WorkerRs.ThreadOptions  = 'ReuseThread'
+    $script:WorkerRs.Open()
+    $script:WorkerRs.SessionStateProxy.SetVariable('Shared', $script:Shared)
+    $script:WorkerPs = [powershell]::Create()
+    $script:WorkerPs.Runspace = $script:WorkerRs
+    [void]$script:WorkerPs.AddScript({
+        param($core, $worker)
+        Import-Module $core -Force
+        Import-Module $worker -Force
+        Invoke-A4950TransferJob -Shared $Shared
+    }).AddArgument($coreModule).AddArgument($workerModule)
+    $script:WorkerHandle = $script:WorkerPs.BeginInvoke()
+
+    $detail = if ($FromLocalCopy) { "Copied from drive - continuing from the local copy." } else { "Source: $DrivePath`nPlease wait - do not remove the drive." }
+    Set-MainCard -Bg '#FFB8860B' -Title 'TRANSFERRING...' -Subtitle $CaseName -Detail $detail
+    if (-not $FromLocalCopy) { Play-KioskStartSound }
+}
+
+# ----------------------------------------------------------------------------
 # Event pump - same $Shared.Messages queue the main app drains, simplified
 # to only the states the kiosk card actually shows.
 # ----------------------------------------------------------------------------
@@ -328,6 +390,20 @@ $pumpTimer.Add_Tick({
         switch ($m.Type) {
             'progress' {
                 switch ($m.Stage) {
+                    'fastcopy' {
+                        $pct = if ($m.TotalBytes -gt 0) { [math]::Min(99, [int](100 * $m.CopiedBytes / $m.TotalBytes)) } else { 0 }
+                        $etaText = 'calculating...'
+                        if ($m.CopiedBytes -gt 0 -and $m.ElapsedSeconds -gt 1 -and $m.TotalBytes -gt $m.CopiedBytes) {
+                            $rate = $m.CopiedBytes / $m.ElapsedSeconds
+                            if ($rate -gt 0) {
+                                $remainSec = [int](($m.TotalBytes - $m.CopiedBytes) / $rate)
+                                $etaText = if ($remainSec -ge 60) { "about $([math]::Ceiling($remainSec / 60))m remaining" } else { "about ${remainSec}s remaining" }
+                            }
+                        } elseif ($m.TotalBytes -gt 0 -and $m.CopiedBytes -ge $m.TotalBytes) {
+                            $etaText = 'finishing up...'
+                        }
+                        $ctrl.MainSubtitle.Text = "Copying from drive - $pct% ($etaText)"
+                    }
                     'hash'     { $ctrl.MainSubtitle.Text = 'Hashing originals...' }
                     'compress' { $ctrl.MainSubtitle.Text = 'Compressing...' }
                     'xfer'     { if ($m.Action -eq 'start') { $ctrl.MainSubtitle.Text = "Transferring: $($m.Name)" } }
@@ -335,22 +411,40 @@ $pumpTimer.Add_Tick({
             }
             'done' {
                 Complete-KioskWorker
-                if ($m.Error) {
+                if ($m.FastCopyStage) {
+                    if ($m.Cancelled) {
+                        $script:Shared.Running = $false
+                        Reset-MainCard
+                    } elseif (-not $m.Success) {
+                        $script:Shared.Running = $false
+                        $errText = if ($m.Error) { $m.Error } else { 'Could not copy from the drive.' }
+                        Set-MainCard -Bg '#FFB0281E' -Title 'COPY FAILED' -Subtitle $errText -Detail 'Tap to try again.'
+                        Play-KioskErrorSound
+                        $ctrl.BtnExit.Visibility = 'Collapsed'
+                    } else {
+                        Play-KioskCompletedSound
+                        Set-MainCard -Bg '#FF00695C' -Title 'DRIVE SAFE TO REMOVE' `
+                            -Subtitle 'Stage 1 complete - you can remove the drive now.' -Detail 'Continuing in the background...'
+                        Start-KioskMainPipeline -SourceItems @($m.DestinationPath) -CaseName $script:Shared.CaseNumber -FromLocalCopy
+                    }
+                } elseif ($m.Error) {
                     Set-MainCard -Bg '#FFB0281E' -Title 'TRANSFER FAILED' -Subtitle $m.Error -Detail 'Tap to try again.'
                     Play-KioskErrorSound
+                    $ctrl.BtnExit.Visibility = 'Collapsed'
                 } elseif ($m.Cancelled) {
                     Reset-MainCard
                 } elseif ($m.Fail) {
                     Set-MainCard -Bg '#FFB0281E' -Title 'TRANSFER FAILED' `
                         -Subtitle "$($m.Ok) transferred, $($m.Fail) failed" -Detail 'Tap to try again.'
                     Play-KioskErrorSound
+                    $ctrl.BtnExit.Visibility = 'Collapsed'
                 } else {
                     $fileNames = @($m.Files) | Where-Object { $_ -notmatch '_TRANSFER\.log$' }
                     Set-MainCard -Bg '#FF1565C0' -Title 'COMPLETED' `
                         -Subtitle "$($m.Ok) file(s) sent to $($m.Destination)" -Detail ($fileNames -join "`n")
                     Play-KioskCompletedSound
+                    $ctrl.BtnExit.Visibility = 'Collapsed'
                 }
-                $ctrl.BtnExit.Visibility = 'Collapsed'
             }
         }
     }

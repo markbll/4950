@@ -263,7 +263,8 @@ full Options/Selection UI with a single giant card:
 2. The **entire selected drive** is captured, hashed, compressed and
    transferred — the same as adding that drive's root as a folder in the
    main app with "Select all folders/files by default" on. No folder/file
-   picking, no Options panel.
+   picking, no Options panel. If **Fast Transfer** is enabled (see below),
+   this happens in two stages instead — see **Fast Transfer** below.
 3. The card turns **blue** and reads **"COMPLETED"** with the file name(s)
    that were sent, once the job finishes. Tap it again to start the next
    drive's transfer.
@@ -298,6 +299,25 @@ set for **Transfer started / completed / error** — these are the same
 sounds the main app's Options panel uses (`SoundStartPath`,
 `SoundFinishPath`, `SoundErrorPath` in `config.json`), so Kiosk Mode plays
 them too without needing to open the full app.
+
+**Fast Transfer:** also in the Kiosk Mode section, tick **Enable Fast
+Transfer** and pick a **local fixed drive** from the dropdown (only real
+local drives on this PC are listed, refreshable). When enabled, a transfer
+runs in two stages instead of one:
+
+- **Stage 1** — a fast, raw copy (no hashing or compression) from the
+  source drive straight to a folder on the chosen local drive
+  (`<drive>\Auto4950FastTransfer\<case>`). The card shows a live percentage
+  and an estimated time remaining while it runs.
+- Once Stage 1 finishes, the card turns **teal** and reads **"DRIVE SAFE TO
+  REMOVE"** — the source drive can be disconnected at this point.
+- **Stage 2** starts automatically in the background from that local copy:
+  hashing, compression and the network transfer proceed exactly as before,
+  just without needing the original drive connected any more.
+
+This is useful when the network transfer is the slow part of the job — it
+lets an intake station process the next drive immediately instead of
+waiting for the whole job (including the network leg) to finish.
 
 ---
 
@@ -350,6 +370,9 @@ See `config.example.json`. Key settings:
 - **KioskBlockedDrives** — drives excluded from [Kiosk Mode](#kiosk-mode)'s
   source list, each `{ "Serial": "<volume serial number>", "Label": "<for
   display>" }`. Managed from Setup's **Blocked drives** list, not hand-edited.
+- **KioskFastTransferEnabled / KioskFastTransferPath** — [Kiosk Mode](#kiosk-mode)'s
+  Fast Transfer option and its local staging folder (e.g. `D:\Auto4950FastTransfer`).
+  Managed from Setup's **Fast Transfer** section, not hand-edited.
 
 ### Staging space guide
 
