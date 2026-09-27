@@ -10,6 +10,27 @@
      body text uses --text-muted (#525252) everywhere.
    ========================================================================== */
 
+/* Metric-matched fallbacks: the page first renders in a local font sized to match the web
+   fonts, so text does not re-wrap (and the page does not jump) when the web fonts arrive.
+   Values measured against Arial in Chromium (Inter ≈ 106.9% of Arial width, Space Grotesk ≈ 101.8%). */
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans'), local('Helvetica');
+  size-adjust: 106.9%;
+  ascent-override: 90.7%;
+  descent-override: 22.5%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Space Grotesk Fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Arial'), local('Liberation Sans Bold'), local('Helvetica Bold');
+  font-weight: 700;
+  size-adjust: 101.8%;
+  ascent-override: 96.3%;
+  descent-override: 28.5%;
+  line-gap-override: 0%;
+}
+
 :root {
   --near-black: #0a0e1a;
   --navy: #0f172a;
@@ -27,8 +48,8 @@
   --error: #b91c1c;
   --success: #166534;
 
-  --font-heading: 'Space Grotesk', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Space Grotesk', 'Space Grotesk Fallback', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', 'Inter Fallback', 'Segoe UI', system-ui, -apple-system, sans-serif;
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -306,7 +327,10 @@ main:focus {
   font: 600 0.9375rem var(--font-body);
   cursor: pointer;
 }
-.menu-toggle[hidden] {
+/* Without JavaScript the nav is always open, so the toggle is pointless. The inline boot
+   script adds .js before first paint, so the button takes up its space immediately
+   (no layout shift when the menu script loads). */
+html:not(.js) .menu-toggle {
   display: none;
 }
 .menu-toggle-bars,
@@ -807,6 +831,9 @@ thead th {
 }
 thead th a {
   color: var(--white);
+  display: inline-block;
+  min-height: 24px;
+  padding: 0.2rem 0;
 }
 .th-price {
   display: block;
@@ -1020,6 +1047,7 @@ textarea {
   min-height: 48px;
   padding: 0.65rem 0.85rem;
   font: inherit;
+  font-size: max(16px, 1rem); /* below 16px, iOS Safari zooms the page when the field is focused */
   color: var(--text);
   background: var(--white);
   border: 2px solid var(--grey);
@@ -1061,8 +1089,10 @@ textarea:focus-visible {
 }
 .field-check input,
 .radio input {
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 24px;
+  min-height: 24px;
   margin: 0.2rem 0 0;
   accent-color: var(--near-black);
 }

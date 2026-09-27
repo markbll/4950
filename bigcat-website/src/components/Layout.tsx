@@ -72,7 +72,7 @@ function Header({ path }: { path: string }) {
             <span className="cta-long">Free Local Visibility Check-up</span>
             <span className="cta-short">Free Check-up</span>
           </a>
-          <button type="button" className="menu-toggle" aria-expanded="false" aria-controls="site-nav" hidden>
+          <button type="button" className="menu-toggle" aria-expanded="false" aria-controls="site-nav">
             <span className="menu-toggle-bars" aria-hidden="true" />
             <span className="menu-toggle-label">Menu</span>
           </button>

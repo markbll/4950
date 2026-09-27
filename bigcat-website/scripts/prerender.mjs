@@ -44,9 +44,11 @@ const islandKeys = {
 const entryImports = new Set(collectImports('src/entry-client.ts'));
 // react-dom/client is a dynamic import of the entry (loaded only when an island hydrates).
 const runtimeChunks = (entry.dynamicImports ?? []).filter((k) => !Object.values(islandKeys).includes(k)).flatMap((k) => collectImports(k));
-// Preload the above-the-fold form islands (and React) on the pages that have them.
-// The footer subscribe island is deliberately NOT preloaded — it hydrates on approach.
-const eager = ['checkup', 'contact'];
+
+
+// No islands are preloaded: on slow mobile connections a high-priority React download delays the
+// first paint (LCP). Forms hydrate as soon as they are on screen, before anyone can type.
+const eager = [];
 const islandPreloads = Object.fromEntries(
   Object.entries(islandKeys).map(([name, key]) => [
     name,
