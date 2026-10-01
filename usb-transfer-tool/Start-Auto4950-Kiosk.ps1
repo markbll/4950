@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Auto 49/50 - Kiosk Mode: one-button transfer of a whole external drive.
+    Auto 49/50 - Kiosk Mode: one-button transfer of a whole drive.
 
 .DESCRIPTION
     A simplified, full-screen front end for the same compress/hash/transfer
@@ -11,9 +11,11 @@
     UI with a single large button:
 
       1. Tap the button - a small dialog asks for the CMS case number, the
-         pass number, and the source drive (only genuinely external/removable
-         drives are listed, minus any blocked in Setup.ps1's Kiosk Mode
-         section - see Get-A4950AvailableKioskDrives in Core.psm1).
+         pass number, and the source drive (every drive letter Windows has,
+         minus any blocked in Setup.ps1's Kiosk Mode section - see
+         Get-A4950AvailableKioskDrives in Core.psm1. There is no automatic
+         "external drive only" detection; blocking the system drive, e.g.
+         'C:', is the admin's responsibility via that block list).
       2. The ENTIRE selected drive is captured, hashed, compressed and
          transferred - the same as adding that drive's root as a folder in
          the main app, with "Select all folders/files by default" on.
@@ -52,7 +54,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.11'
+$script:AppVersion = '6.12'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -175,7 +177,7 @@ function Reset-MainCard {
 }
 
 # ----------------------------------------------------------------------------
-# "New Transfer" dialog - CMS case, pass number, external source drive.
+# "New Transfer" dialog - CMS case, pass number, source drive.
 # ----------------------------------------------------------------------------
 function Show-NewTransferDialog {
     [xml]$dxaml = @"
@@ -185,7 +187,7 @@ function Show-NewTransferDialog {
         ResizeMode="NoResize" Background="#FF2A2A33" FontFamily="Segoe UI">
   <StackPanel Margin="24">
     <TextBlock Text="New Transfer" FontSize="22" FontWeight="Bold" Foreground="#FFECECEC" Margin="0,0,0,4"/>
-    <TextBlock Text="Enter the case details and pick the external drive to transfer." Foreground="#FF9AA0A6" TextWrapping="Wrap" Margin="0,0,0,16"/>
+    <TextBlock Text="Enter the case details and pick the drive to transfer." Foreground="#FF9AA0A6" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
     <TextBlock Text="CMS Case Number" Foreground="#FF4FC3F7" FontWeight="Bold" FontSize="14"/>
     <TextBox x:Name="TxtCase" Padding="7" FontSize="16" Background="#FF20202A" Foreground="#FFECECEC" BorderBrush="#FF444450" Margin="0,4,0,14"/>
@@ -193,7 +195,7 @@ function Show-NewTransferDialog {
     <TextBlock Text="Pass Number" Foreground="#FF4FC3F7" FontWeight="Bold" FontSize="14"/>
     <TextBox x:Name="TxtPass" Padding="7" FontSize="16" Background="#FF20202A" Foreground="#FFECECEC" BorderBrush="#FF444450" Margin="0,4,0,14"/>
 
-    <TextBlock Text="Source Drive (external only)" Foreground="#FF4FC3F7" FontWeight="Bold" FontSize="14"/>
+    <TextBlock Text="Source Drive" Foreground="#FF4FC3F7" FontWeight="Bold" FontSize="14"/>
     <DockPanel Margin="0,4,0,2">
       <Button x:Name="BtnRefresh" Content="Refresh" DockPanel.Dock="Right" Padding="12,7" Margin="8,0,0,0"
               Background="#FF3A3A46" Foreground="White" BorderThickness="0"/>
@@ -226,10 +228,10 @@ function Show-NewTransferDialog {
         if ((& $dg 'CmbDrive').Items.Count -gt 0) {
             (& $dg 'CmbDrive').SelectedIndex = 0
             (& $dg 'LblDriveHint').Text = ''
-        } elseif (@(Get-A4950RemovableDrives).Count -gt 0) {
-            (& $dg 'LblDriveHint').Text = 'The only connected external drive(s) are blocked from Kiosk Mode. See Setup.ps1 to review the block list.'
+        } elseif (@(Get-A4950AllDrives).Count -gt 0) {
+            (& $dg 'LblDriveHint').Text = 'Every connected drive is blocked from Kiosk Mode. See Setup.ps1 to review the block list.'
         } else {
-            (& $dg 'LblDriveHint').Text = 'No external/removable drive detected. Connect one, then click Refresh.'
+            (& $dg 'LblDriveHint').Text = 'No drive detected. Connect the source drive, then click Refresh.'
         }
     }
     Update-DriveChoices
@@ -247,7 +249,7 @@ function Show-NewTransferDialog {
             $errs += "CMS case must start with '$($config.CasePrefix)' and include an identifier."
         }
         if (-not $pass) { $errs += 'Enter a pass number.' }
-        if (-not $driveSel) { $errs += 'Select an external source drive (connect one and click Refresh if none is listed).' }
+        if (-not $driveSel) { $errs += 'Select a source drive (connect one and click Refresh if none is listed).' }
 
         if ($errs.Count) {
             (& $dg 'LblError').Text = ($errs -join ' ')

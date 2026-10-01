@@ -1144,95 +1144,73 @@ function Test-A4950OpName {
     return $true
 }
 
-function Get-A4950RemovableDrives {
+function Get-A4950AllDrives {
     <#
-    .SYNOPSIS List only genuinely removable/external drives.
+    .SYNOPSIS List every drive letter Windows exposes - fixed, removable, network, everything.
     .DESCRIPTION
-        Used by Kiosk Mode, where the source must be an external drive - unlike
-        the full app's "Source drive" dropdown (which lists every drive type so
-        nothing is hidden from the operator), this deliberately excludes
-        anything that isn't confirmed removable/external. If WMI itself is
-        unavailable, this returns an empty list rather than guessing from
-        Get-PSDrive (which has no reliable drive-type information) - failing
-        closed here is safer than letting a kiosk operator accidentally point
-        a job at a fixed internal drive.
+        No DriveType/interface filtering at all - used by Kiosk Mode's
+        source-drive list and Setup's Fast Transfer destination picker.
+        Earlier versions tried to auto-detect "external/removable" or
+        "local fixed" drives via Win32_LogicalDisk.DriveType and
+        Win32_DiskDrive.InterfaceType; that heuristic proved unreliable in
+        practice (some USB-attached drives, and in some environments WMI
+        itself, don't report the way Windows' own drive-type model assumes,
+        leaving the picker empty even with a drive connected). This instead
+        shows everything and leaves the judgement to the operator/admin -
+        same approach the main app's own "Source drive" dropdown already
+        uses - with Kiosk Mode's KioskBlockedDriveLetters list (see
+        Get-A4950AvailableKioskDrives) as the actual safeguard, e.g.
+        against picking the system drive.
 
-        Combines two checks rather than just Win32_LogicalDisk.DriveType:
-        USB flash drives report DriveType 2 (Removable), but USB external
-        hard drives/SSDs almost always report DriveType 3 (Fixed) - the same
-        value as an internal drive - because DriveType reflects the media,
-        not the connection (Explorer shows them as ejectable by separately
-        detecting the USB bus, which is what this also does via
-        Win32_DiskDrive.InterfaceType). Filtering on the physical disk's
-        interface catches USB hard drives that DriveType alone would miss.
+        Falls back to Get-PSDrive if WMI/CIM itself is unavailable or
+        returns nothing, instead of silently returning an empty list either
+        way.
     #>
     [CmdletBinding()]
     param()
     try {
-        $found = New-Object System.Collections.Generic.List[object]
+        $disks = @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop | Where-Object { $_.DeviceID } | Sort-Object DeviceID)
+        if ($disks.Count -gt 0) { return $disks }
+    } catch {}
+    return @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^[A-Za-z]$' } |
+        Sort-Object Name |
+        ForEach-Object { [pscustomobject]@{ DeviceID = "$($_.Name):"; VolumeName = $_.Description } })
+}
 
-        # DriveType 2 = Removable (thumb drives, SD cards, etc.)
-        @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
-            Where-Object { $_.DeviceID -and $_.DriveType -eq 2 }) |
-            ForEach-Object { $found.Add($_) }
-
-        # Any drive letter that lives on a USB-attached physical disk, even
-        # if that disk itself reports as "Fixed" media (external HDDs/SSDs).
-        @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop |
-            Where-Object { $_.InterfaceType -eq 'USB' }) | ForEach-Object {
-                $disk = $_
-                @(Get-CimAssociatedInstance -InputObject $disk -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue) |
-                    ForEach-Object {
-                        @(Get-CimAssociatedInstance -InputObject $_ -ResultClassName Win32_LogicalDisk -ErrorAction SilentlyContinue) |
-                            Where-Object { $_.DeviceID } | ForEach-Object { $found.Add($_) }
-                    }
-            }
-
-        return @($found | Sort-Object DeviceID -Unique)
-    } catch {
-        return @()
-    }
+function ConvertTo-A4950DriveLetter {
+    <#
+    .SYNOPSIS Normalize a drive-letter string (e.g. 'c', 'D:\', 'e:') to the "X:" form Win32_LogicalDisk.DeviceID uses.
+    .DESCRIPTION
+        Shared by Setup.ps1 (saving KioskBlockedDriveLetters) and
+        Get-A4950AvailableKioskDrives (matching against it), so a drive
+        letter typed without a trailing colon, or pasted with a trailing
+        backslash, still matches correctly either way.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Letter)
+    $l = $Letter.Trim().TrimEnd('\').ToUpperInvariant()
+    if ($l -and $l -notmatch ':$') { $l = "$l`:" }
+    return $l
 }
 
 function Get-A4950AvailableKioskDrives {
     <#
-    .SYNOPSIS Kiosk Mode's selectable source drives - removable drives minus any blocked ones.
+    .SYNOPSIS Kiosk Mode's selectable source drives - every drive minus any blocked ones.
     .DESCRIPTION
-        Same list as Get-A4950RemovableDrives, with any drive letter in
+        All drives (see Get-A4950AllDrives), with any drive letter in
         Config.KioskBlockedDriveLetters filtered out (see Get-DefaultConfig -
         a plain list of drive letters typed into Setup.ps1's Kiosk Mode
-        section, e.g. 'C:' for the system drive). Matching is a simple,
-        case-insensitive drive-letter comparison - deliberately simpler than
-        matching by volume serial number, which proved unreliable in
-        practice.
+        section, e.g. 'C:' for the system drive). This is Kiosk Mode's only
+        safeguard against an unwanted drive being selected - no removable/
+        external detection is applied beneath it.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Config)
-    $blocked = @($Config.KioskBlockedDriveLetters | ForEach-Object { ([string]$_).TrimEnd('\').ToUpperInvariant() } | Where-Object { $_ })
-    if (-not $blocked.Count) { return @(Get-A4950RemovableDrives) }
-    return @(Get-A4950RemovableDrives | Where-Object { $_.DeviceID.ToUpperInvariant() -notin $blocked })
-}
-
-function Get-A4950LocalFixedDrives {
-    <#
-    .SYNOPSIS List local fixed drives (WMI DriveType 3) - candidates for Kiosk Mode's Fast Transfer staging area.
-    .DESCRIPTION
-        Used by Setup.ps1 to populate the "local drive for the fast copy"
-        picker: only local, fixed (non-removable, non-network) drives make
-        sense as a Stage 1 destination, since the whole point is a quick
-        local copy off the source drive. Returns Win32_LogicalDisk objects
-        (DeviceID, VolumeName, FreeSpace, Size). Fails closed (empty list)
-        if WMI is unavailable, same as Get-A4950RemovableDrives.
-    #>
-    [CmdletBinding()]
-    param()
-    try {
-        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
-            Where-Object { $_.DeviceID -and $_.DriveType -eq 3 } |
-            Sort-Object DeviceID)
-    } catch {
-        return @()
-    }
+    $blocked = @($Config.KioskBlockedDriveLetters | Where-Object { $_ } | ForEach-Object { ConvertTo-A4950DriveLetter $_ })
+    $all = @(Get-A4950AllDrives)
+    if (-not $blocked.Count) { return $all }
+    return @($all | Where-Object { $_.DeviceID.ToUpperInvariant() -notin $blocked })
 }
 
 function Write-A4950Log {

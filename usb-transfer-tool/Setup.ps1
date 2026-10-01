@@ -127,7 +127,7 @@ $configPath = Get-ConfigPath
 
     <Separator Margin="0,16,0,10"/>
     <TextBlock Text="5. Kiosk Mode (optional)" Foreground="#FFECECEC" FontWeight="SemiBold"/>
-    <TextBlock Text="A simplified, full-screen, one-button front end for unattended intake stations - it asks only for the CMS case number, pass number and an external source drive, then transfers the whole drive using the settings above. Save your configuration first." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,10"/>
+    <TextBlock Text="A simplified, full-screen, one-button front end for unattended intake stations - it asks only for the CMS case number, pass number and a source drive, then transfers the whole drive using the settings above. Save your configuration first." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,10"/>
     <CheckBox x:Name="KioskAutoStart" Content="Also launch automatically when Windows starts (recommended for kiosk PCs)" Foreground="#FFECECEC" Margin="0,0,0,8"/>
     <StackPanel Orientation="Horizontal">
       <Button x:Name="BtnKiosk" Content="Create Kiosk Mode Shortcut" Padding="12,7" Margin="0,0,8,0" Background="#FF3A3A80" Foreground="#FFECECEC"/>
@@ -214,14 +214,14 @@ function Update-FastDriveChoices {
     (& $g 'FastLocation').Text = $currentLocation
 
     (& $g 'FastDrive').Items.Clear()
-    $drives = @(Get-A4950LocalFixedDrives)
+    $drives = @(Get-A4950AllDrives)
     foreach ($d in $drives) {
         $freeGb = [math]::Round($d.FreeSpace / 1GB, 1)
         $label = "{0}  {1}  ({2} GB free)" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' })), $freeGb
         [void](& $g 'FastDrive').Items.Add($label)
     }
     if ((& $g 'FastDrive').Items.Count -eq 0) {
-        (& $g 'FastTransferStatus').Text = 'No local fixed drive detected to use for Fast Transfer.'
+        (& $g 'FastTransferStatus').Text = 'No drive detected on this PC.'
         (& $g 'FastTransferStatus').Foreground = '#FFFFCA28'
         return
     }
@@ -350,7 +350,7 @@ function Select-WavFile {
     $config.KioskBlockedDriveLetters = @(
         (& $g 'BlockedLetters').Text -split '[,;\s]+' |
             Where-Object { $_ } |
-            ForEach-Object { $letter = $_.TrimEnd('\').ToUpperInvariant(); if ($letter -notmatch ':$') { "$letter`:" } else { $letter } } |
+            ForEach-Object { ConvertTo-A4950DriveLetter $_ } |
             Select-Object -Unique
     )
 

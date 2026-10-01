@@ -27,7 +27,7 @@ optional pass number.
 | Duplicate-safe destination | Never overwrites: a clashing destination file name gets a date/time appended |
 | Fault handling | Per-item and per-file errors are logged and skipped without aborting the whole job |
 | Job queue | **Add to Queue** snapshots the current selection, identifiers and Options into a queue entry, then clears the screen to build the next one. **Start Queue** runs queued jobs one after another automatically. Each entry has its own **Edit** (recall it onto the screen to change anything) and **Remove** (cancel it outright); **Stop Queue** halts auto-advance without touching whatever job is currently running |
-| Kiosk Mode | A separate, full-screen, one-button front end (`Start-Auto4950-Kiosk.ps1`) for unattended intake — asks only for the CMS case, pass number and an external source drive, then transfers the whole drive. The card turns blue and shows "COMPLETED" with the file name(s) sent; `Setup.ps1` can create its desktop shortcut (and an auto-start-at-sign-in option) — see [Kiosk Mode](#kiosk-mode) below |
+| Kiosk Mode | A separate, full-screen, one-button front end (`Start-Auto4950-Kiosk.ps1`) for unattended intake — asks only for the CMS case, pass number and a source drive, then transfers the whole drive. The card turns blue and shows "COMPLETED" with the file name(s) sent; `Setup.ps1` can create its desktop shortcut (and an auto-start-at-sign-in option) — see [Kiosk Mode](#kiosk-mode) below |
 | CMS / OP / Pass in the name | CMS case (`CMS-A…`) and/or **UPPERCASE** OP name (one required) plus an optional operator **pass number** are combined into the folder/archive name |
 | Quick Transfer | One button applies the fastest settings (store, **split into 250 MB parts**, **transfer instantly**, **no hashing, no manifest**) — warns first that integrity is not recorded |
 | All options on the main screen | Every setting (incl. **sizing** dropdown) on the on-screen Options panel; **Browse…** pickers for share/staging/7-Zip |
@@ -256,10 +256,10 @@ panel) and the exact same compress/hash/transfer pipeline, but replaces the
 full Options/Selection UI with a single giant card:
 
 1. **Tap the card.** A small dialog asks for the **CMS case number**, the
-   **pass number**, and the **source drive** — only genuinely
-   external/removable drives are listed (fixed/internal drives never
-   appear, so a kiosk operator can't accidentally point a job at the
-   system drive).
+   **pass number**, and the **source drive** — every drive letter Windows
+   has, minus any blocked in Setup's **Blocked drives** list (see below).
+   There's no automatic "external drive only" detection — blocking the
+   system drive (e.g. `C:`) is the admin's responsibility.
 2. The **entire selected drive** is captured, hashed, compressed and
    transferred — the same as adding that drive's root as a folder in the
    main app with "Select all folders/files by default" on. No folder/file
@@ -288,10 +288,13 @@ to intake.
 
 **Blocking a drive:** the same section has a **Blocked drives** box — type
 the drive letter(s) that should never be offered as a Kiosk Mode source
-(e.g. `C:` for the operating system drive), comma-separated. Unlike
-removable-drive detection, this is a simple, direct letter match, so it
-can't silently fail to recognise a drive. Remember to click **Save
-configuration**.
+(e.g. `C:` for the operating system drive), comma-separated. This is the
+**only** safeguard against an unwanted drive being selected — Kiosk Mode's
+source list has no automatic "external/removable only" detection (an
+earlier attempt at that proved unreliable in practice), so set this before
+putting a kiosk PC into service. It's a simple, direct letter match, so it
+can't silently fail to recognise a drive the way detection-based filtering
+could. Remember to click **Save configuration**.
 
 **Notification sounds:** also in that section, optional `.wav` files can be
 set for **Transfer started / completed / error** — these are the same

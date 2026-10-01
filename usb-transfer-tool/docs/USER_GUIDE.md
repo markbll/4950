@@ -472,11 +472,15 @@ Options panels with one giant card that fills the screen.
    automatically when Windows starts"** first if this is a PC dedicated to
    intake, to also add it to the current user's Startup folder (no
    administrator rights needed - this only affects that one account).
-3. Optionally, in the same section:
+3. **Set this before putting a kiosk PC into service** — Kiosk Mode's
+   source list has no automatic "external drive only" detection, so this
+   is the only thing stopping the system drive (or any other unwanted
+   drive) from being selectable:
    - **Blocked drives** - type the drive letter(s) that should never be
      offered as a Kiosk Mode source, comma-separated (e.g. `C:` for the
      operating system drive). This is a direct letter match - simpler and
      more predictable than matching by volume serial number.
+   Also optional, in the same section:
    - **Notification sounds** - optional `.wav` files for **Transfer
      started / completed / error**. These are the same sounds as the main
      app's Options panel (they're shared, not Kiosk-only), so setting them
@@ -495,11 +499,13 @@ Options panels with one giant card that fills the screen.
      start with the configured prefix and include an identifier).
    - **Pass Number** - required in Kiosk Mode (there's no OP-name
      alternative here, unlike the main app).
-   - **Source Drive** - a dropdown of only genuinely external/removable
-     drives currently connected, minus any blocked in Setup.ps1 (see
-     above). Fixed/internal drives are never listed, so a job can't
-     accidentally be pointed at the system drive. If nothing is listed,
-     connect the drive and click **Refresh**.
+   - **Source Drive** - a dropdown of every drive letter Windows has,
+     minus any blocked in Setup.ps1's **Blocked drives** box (see above).
+     There is **no** automatic external/removable-only filtering - the
+     block list is the only thing stopping the system drive or another
+     unwanted drive from being selectable, so set it before putting a
+     kiosk PC into service. If nothing is listed, connect the drive and
+     click **Refresh**.
 2. Click **Start Transfer**. The **entire selected drive** is captured
    recursively, hashed, compressed and transferred - the same as adding
    that drive's root as a folder in the main app with "Select all
