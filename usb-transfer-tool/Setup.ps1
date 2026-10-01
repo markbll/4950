@@ -135,23 +135,19 @@ $configPath = Get-ConfigPath
     <TextBlock x:Name="KioskStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
 
     <TextBlock Text="Blocked drives (cannot be selected in Kiosk Mode)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
-    <TextBlock Text="Stops a specific drive from ever being chosen as the Kiosk Mode source - e.g. a staff USB stick that should never be transferred. Matched by the drive's volume serial number, so it still applies if the drive letter changes." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
-    <ListBox x:Name="BlockedList" Height="80" Background="#FF20202A" Foreground="#FFECECEC" Margin="0,0,0,6"/>
-    <StackPanel Orientation="Horizontal">
-      <Button x:Name="BtnBlockAdd" Content="Block a connected drive..." Padding="12,6" Margin="0,0,8,0" Background="#FF3A3A46" Foreground="#FFECECEC"/>
-      <Button x:Name="BtnBlockRemove" Content="Unblock selected" Padding="12,6" Background="#FF3A3A46" Foreground="#FFECECEC"/>
-    </StackPanel>
-    <TextBlock x:Name="BlockStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+    <TextBlock Text="Drive letters that can never be chosen as the Kiosk Mode source - e.g. the operating system drive. Comma-separated, e.g. C:, D:" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+    <TextBox x:Name="BlockedLetters" Padding="6" Background="#FF20202A" Foreground="#FFECECEC" Margin="0,0,0,10"/>
 
-    <TextBlock Text="Fast Transfer (optional)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
-    <TextBlock Text="Copies the drive's contents to a local drive first (Stage 1 - no hashing/compression, just a fast raw copy), then hashes, compresses and sends to the network destination in the background (Stage 2). Lets the USB/external drive be removed as soon as Stage 1 finishes, instead of staying connected for the whole job." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <TextBlock Text="Fast Transfer (optional)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,4,0,2"/>
+    <TextBlock Text="Copies the drive's contents to a local folder first (Stage 1 - no hashing/compression, just a fast raw copy), then hashes, compresses and sends to the network destination in the background (Stage 2). Lets the USB/external drive be removed as soon as Stage 1 finishes, instead of staying connected for the whole job." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
     <CheckBox x:Name="FastTransferEnabled" Content="Enable Fast Transfer" Foreground="#FFECECEC" Margin="0,0,0,8"/>
-    <TextBlock Text="Local drive for the Stage 1 copy" Foreground="#FF9AA0A6" FontSize="11"/>
+    <TextBlock Text="Local folder for the Stage 1 copy" Foreground="#FF9AA0A6" FontSize="11"/>
     <DockPanel Margin="0,2,0,4">
-      <Button x:Name="BtnFastDriveRefresh" Content="Refresh" DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
-      <ComboBox x:Name="FastDrive" Padding="6" Background="#FF20202A" Foreground="#FFECECEC"/>
+      <Button x:Name="BtnFastBrowse" Content="Browse..." DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <TextBox x:Name="FastPath" Padding="6" Background="#FF20202A" Foreground="#FFECECEC"/>
     </DockPanel>
-    <TextBlock x:Name="FastTransferStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,10"/>
+    <TextBlock Text="If this folder doesn't have enough free space for a given drive when a transfer starts, Fast Transfer is skipped for that job and the normal single-stage transfer runs instead - silently, no prompt." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,4"/>
+    <TextBlock x:Name="FastTransferStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
     <TextBlock Text="Notification sounds (Kiosk Mode and the main app)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,14,0,2"/>
     <TextBlock Text="Optional .wav files played on the events below - leave blank for the default Windows sound. Used by Kiosk Mode and the main app's Options panel alike." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -202,40 +198,8 @@ $g = { param($n) $w.FindName($n) }
 (& $g 'SoundError').Text  = $config.SoundErrorPath
 
 (& $g 'FastTransferEnabled').IsChecked = [bool]$config.KioskFastTransferEnabled
-$script:FastTransferSubfolder = 'Auto4950FastTransfer'
-function Update-FastDriveChoices {
-    $currentDeviceId = if ($config.KioskFastTransferPath) { ($config.KioskFastTransferPath -split '\\')[0] } else { $null }
-    (& $g 'FastDrive').Items.Clear()
-    $drives = @(Get-A4950LocalFixedDrives)
-    foreach ($d in $drives) {
-        $freeGb = [math]::Round($d.FreeSpace / 1GB, 1)
-        $label = "{0}  {1}  ({2} GB free)" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' })), $freeGb
-        [void](& $g 'FastDrive').Items.Add($label)
-    }
-    if ((& $g 'FastDrive').Items.Count -eq 0) {
-        (& $g 'FastTransferStatus').Text = 'No local fixed drive detected to use for Fast Transfer.'
-        (& $g 'FastTransferStatus').Foreground = '#FFFFCA28'
-        return
-    }
-    (& $g 'FastTransferStatus').Text = ''
-    $preselect = 0
-    if ($currentDeviceId) {
-        for ($i = 0; $i -lt $drives.Count; $i++) { if ($drives[$i].DeviceID -eq $currentDeviceId) { $preselect = $i; break } }
-    }
-    (& $g 'FastDrive').SelectedIndex = $preselect
-}
-Update-FastDriveChoices
-(& $g 'BtnFastDriveRefresh').Add_Click({ Update-FastDriveChoices })
-
-$script:BlockedDrives = New-Object System.Collections.Generic.List[object]
-foreach ($b in @($config.KioskBlockedDrives)) {
-    if ($b -and $b.Serial) { $script:BlockedDrives.Add([pscustomobject]@{ Serial = $b.Serial; Label = $b.Label }) }
-}
-function Update-BlockedList {
-    (& $g 'BlockedList').Items.Clear()
-    foreach ($b in $script:BlockedDrives) { [void](& $g 'BlockedList').Items.Add("$($b.Label)  [$($b.Serial)]") }
-}
-Update-BlockedList
+(& $g 'FastPath').Text = $config.KioskFastTransferPath
+(& $g 'BlockedLetters').Text = ($config.KioskBlockedDriveLetters -join ', ')
 
 (& $g 'BtnTestNet').Add_Click({
     $path = (& $g 'Net').Text.Trim()
@@ -306,83 +270,15 @@ function Select-WavFile {
 (& $g 'BtnSoundFinish').Add_Click({ $p = Select-WavFile -Title 'Select transfer-completed sound (.wav)'; if ($p) { (& $g 'SoundFinish').Text = $p } })
 (& $g 'BtnSoundError').Add_Click({ $p = Select-WavFile -Title 'Select transfer-error sound (.wav)'; if ($p) { (& $g 'SoundError').Text = $p } })
 
-function Show-DrivePickerDialog {
-    <#
-    .SYNOPSIS Small modal to pick one connected drive from a list, for the "block a drive" flow.
-    #>
-    param([Parameter(Mandatory)][array]$Drives)
-    [xml]$pxaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Block a Drive" Height="220" Width="440" WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize" Background="#FF2A2A33" FontFamily="Segoe UI">
-  <StackPanel Margin="18">
-    <TextBlock Text="Select the connected drive to block from Kiosk Mode:" Foreground="#FFECECEC" TextWrapping="Wrap" Margin="0,0,0,10"/>
-    <ComboBox x:Name="CmbPick" Padding="6" FontSize="14"/>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-      <Button x:Name="BtnPCancel" Content="Cancel" Padding="14,6" Margin="4" Background="#FF3A3A46" Foreground="White" BorderThickness="0"/>
-      <Button x:Name="BtnPOk" Content="Block" Padding="14,6" Margin="4" Background="#FF8E2A2A" Foreground="White" BorderThickness="0" FontWeight="Bold"/>
-    </StackPanel>
-  </StackPanel>
-</Window>
-"@
-    $pw = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $pxaml))
-    $pg = { param($n) $pw.FindName($n) }
-    $pw.Owner = $w
-    foreach ($d in $Drives) {
-        $label = "{0}  {1}" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' }))
-        [void](& $pg 'CmbPick').Items.Add($label)
+(& $g 'BtnFastBrowse').Add_Click({
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Select the local folder for Fast Transfer Stage 1 copies'
+    $dlg.ShowNewFolderButton = $true
+    if ((& $g 'FastPath').Text) { $dlg.SelectedPath = (& $g 'FastPath').Text }
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        (& $g 'FastPath').Text = $dlg.SelectedPath
+        (& $g 'FastTransferStatus').Text = ''
     }
-    (& $pg 'CmbPick').SelectedIndex = 0
-    $script:DrivePickResult = $null
-    (& $pg 'BtnPCancel').Add_Click({ $pw.DialogResult = $false; $pw.Close() })
-    (& $pg 'BtnPOk').Add_Click({
-        $idx = (& $pg 'CmbPick').SelectedIndex
-        if ($idx -ge 0) { $script:DrivePickResult = $Drives[$idx] }
-        $pw.DialogResult = $true
-        $pw.Close()
-    })
-    [void]$pw.ShowDialog()
-    return $script:DrivePickResult
-}
-
-(& $g 'BtnBlockAdd').Add_Click({
-    $drives = @(Get-A4950RemovableDrives)
-    if (-not $drives.Count) {
-        (& $g 'BlockStatus').Text = 'No external/removable drive is currently connected. Connect the drive you want to block, then try again.'
-        (& $g 'BlockStatus').Foreground = '#FFFFCA28'
-        return
-    }
-    $picked = Show-DrivePickerDialog -Drives $drives
-    if (-not $picked) { return }
-    if (-not $picked.VolumeSerialNumber) {
-        (& $g 'BlockStatus').Text = 'That drive has no volume serial number to match against, so it cannot be blocked.'
-        (& $g 'BlockStatus').Foreground = '#FFEF5350'
-        return
-    }
-    if ($script:BlockedDrives.Serial -contains $picked.VolumeSerialNumber) {
-        (& $g 'BlockStatus').Text = 'That drive is already blocked.'
-        (& $g 'BlockStatus').Foreground = '#FF9AA0A6'
-        return
-    }
-    $label = "{0}  {1}" -f $picked.DeviceID, ($(if ($picked.VolumeName) { $picked.VolumeName } else { '(no label)' }))
-    $script:BlockedDrives.Add([pscustomobject]@{ Serial = $picked.VolumeSerialNumber; Label = $label })
-    Update-BlockedList
-    (& $g 'BlockStatus').Text = "Blocked $label. Click 'Save configuration' below to keep it."
-    (& $g 'BlockStatus').Foreground = '#FF66BB6A'
-})
-
-(& $g 'BtnBlockRemove').Add_Click({
-    $idx = (& $g 'BlockedList').SelectedIndex
-    if ($idx -lt 0) {
-        (& $g 'BlockStatus').Text = 'Select a blocked drive in the list first.'
-        (& $g 'BlockStatus').Foreground = '#FFFFCA28'
-        return
-    }
-    $script:BlockedDrives.RemoveAt($idx)
-    Update-BlockedList
-    (& $g 'BlockStatus').Text = "Unblocked. Click 'Save configuration' below to keep it."
-    (& $g 'BlockStatus').Foreground = '#FF66BB6A'
 })
 
 (& $g 'BtnKiosk').Add_Click({
@@ -428,16 +324,20 @@ function Show-DrivePickerDialog {
     $config.SoundStartPath      = (& $g 'SoundStart').Text.Trim()
     $config.SoundFinishPath     = (& $g 'SoundFinish').Text.Trim()
     $config.SoundErrorPath      = (& $g 'SoundError').Text.Trim()
-    $config.KioskBlockedDrives  = @($script:BlockedDrives | ForEach-Object { @{ Serial = $_.Serial; Label = $_.Label } })
+    $config.KioskBlockedDriveLetters = @(
+        (& $g 'BlockedLetters').Text -split '[,;\s]+' |
+            Where-Object { $_ } |
+            ForEach-Object { $letter = $_.TrimEnd('\').ToUpperInvariant(); if ($letter -notmatch ':$') { "$letter`:" } else { $letter } } |
+            Select-Object -Unique
+    )
 
     $config.KioskFastTransferEnabled = [bool](& $g 'FastTransferEnabled').IsChecked
-    $fastSel = (& $g 'FastDrive').SelectedItem
-    if ($fastSel) {
-        $selectedDeviceId = $fastSel.ToString().Split(' ')[0]   # e.g. "D:"
-        $config.KioskFastTransferPath = Join-Path $selectedDeviceId $script:FastTransferSubfolder
+    $fastPath = (& $g 'FastPath').Text.Trim()
+    if ($fastPath) {
+        $config.KioskFastTransferPath = $fastPath
     } elseif ($config.KioskFastTransferEnabled) {
         # Enabled but nothing to copy to - don't silently save a broken setup.
-        (& $g 'FastTransferStatus').Text = 'Fast Transfer needs a local drive selected above - it has been left disabled.'
+        (& $g 'FastTransferStatus').Text = 'Fast Transfer needs a local folder selected above - it has been left disabled.'
         (& $g 'FastTransferStatus').Foreground = '#FFEF5350'
         $config.KioskFastTransferEnabled = $false
     }

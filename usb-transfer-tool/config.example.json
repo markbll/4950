@@ -18,7 +18,7 @@
   "SoundErrorPath": "",
   "FontSize": "Medium",
   "DarkMode": true,
-  "KioskBlockedDrives": [],
+  "KioskBlockedDriveLetters": [],
   "KioskFastTransferEnabled": false,
   "KioskFastTransferPath": ""
 }

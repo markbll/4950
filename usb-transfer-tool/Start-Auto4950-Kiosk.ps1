@@ -24,7 +24,10 @@
          card turns teal and says the drive is safe to remove, and Stage 2
          (hash, compress, network transfer) continues automatically in the
          background from that local copy - see Invoke-A4950FastPreCopy in
-         Core.psm1.
+         Core.psm1. If the Fast Transfer destination doesn't have enough
+         free space for this drive, Fast Transfer is skipped silently for
+         this job and it runs as a normal single-stage transfer instead -
+         see Test-A4950FastTransferFits in Core.psm1.
       3. The button turns blue and reads "COMPLETED" with the file name(s)
          that were sent, once the job finishes. Tap it again to start
          another transfer (e.g. for the next drive).
@@ -49,7 +52,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '6.9'
+$script:AppVersion = '6.10'
 $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $coreModule   = Join-Path $scriptRoot 'Modules\Auto4950.Core.psm1'
 $workerModule = Join-Path $scriptRoot 'Modules\Auto4950.Worker.psm1'
@@ -288,7 +291,7 @@ function Start-KioskTransfer {
     $script:Shared.LogFile    = Join-Path (Expand-A4950Path $config.StagingFolder) "$caseSafe\$caseSafe.log"
     $ctrl.BtnExit.Visibility  = 'Visible'
 
-    if ($config.KioskFastTransferEnabled -and $config.KioskFastTransferPath) {
+    if (Test-A4950FastTransferFits -Config $config -SourcePath $drivePath) {
         Start-KioskFastCopyStage -DrivePath $drivePath -CaseName $name -CaseSafe $caseSafe
     } else {
         Start-KioskMainPipeline -SourceItems @($drivePath) -CaseName $name -DrivePath $drivePath

@@ -473,21 +473,18 @@ Options panels with one giant card that fills the screen.
    intake, to also add it to the current user's Startup folder (no
    administrator rights needed - this only affects that one account).
 3. Optionally, in the same section:
-   - **Blocked drives** - click **Block a connected drive...** and pick from
-     the currently-connected external drives to stop that specific drive
-     from ever appearing as a Kiosk Mode source (e.g. a staff USB stick that
-     should never be transferred). It's matched by the drive's volume
-     serial number, so blocking still applies even if the drive letter
-     later changes. Use **Unblock selected** to remove one.
+   - **Blocked drives** - type the drive letter(s) that should never be
+     offered as a Kiosk Mode source, comma-separated (e.g. `C:` for the
+     operating system drive). This is a direct letter match - simpler and
+     more predictable than matching by volume serial number.
    - **Notification sounds** - optional `.wav` files for **Transfer
      started / completed / error**. These are the same sounds as the main
      app's Options panel (they're shared, not Kiosk-only), so setting them
      here is enough even if Kiosk Mode is the only thing ever run on this
      PC.
-   - **Fast Transfer** - tick **Enable Fast Transfer** and pick a local
-     fixed drive from the dropdown (**Refresh** re-scans if you plug in or
-     partition a drive after opening Setup). See **Fast Transfer** below
-     for what this changes.
+   - **Fast Transfer** - tick **Enable Fast Transfer** and **Browse...** to
+     pick the exact local folder Stage 1 should copy into. See **Fast
+     Transfer** below for what this changes.
    Click **Save configuration** afterwards.
 
 ### Running a transfer
@@ -519,13 +516,21 @@ Options panels with one giant card that fills the screen.
 
 ### Fast Transfer
 When enabled (Setup.ps1's Kiosk Mode section), a transfer runs in two
-stages instead of reading from the source drive the whole way through:
+stages instead of reading from the source drive the whole way through.
+
+Before Stage 1 even starts, the destination folder's free space is checked
+against the source drive's size. **If it wouldn't fit, Fast Transfer is
+skipped for that job - silently, with no message shown** - and the job
+runs as a normal single-stage transfer straight from the source drive
+instead, exactly as if Fast Transfer were off.
+
+Otherwise:
 
 1. **Stage 1 - copy.** The card turns amber and reads **"COPYING FROM
    DRIVE..."**, with a live percentage and an estimated time remaining
    (e.g. "Copying from drive - 42% (about 2m remaining)"). This is a raw
    copy only - no hashing or compression yet - straight from the source
-   drive to `<chosen local drive>\Auto4950FastTransfer\<case name>`.
+   drive to `<the folder chosen in Setup>\<case name>`.
 2. **Stage 1 complete.** The card turns **teal** and reads **"DRIVE SAFE TO
    REMOVE"** - the source drive can now be disconnected.
 3. **Stage 2 - in the background.** Hashing, compression and the network
@@ -535,9 +540,9 @@ stages instead of reading from the source drive the whole way through:
 4. Success/failure at the end look exactly the same as a normal transfer
    (blue "COMPLETED" / red with a reason).
 
-If Stage 1 itself fails (e.g. the local drive runs out of space), the card
-turns red and reads **"COPY FAILED"** with the reason; Stage 2 never
-starts in that case.
+If Stage 1 itself fails after starting (e.g. the folder becomes
+unreachable mid-copy), the card turns red and reads **"COPY FAILED"** with
+the reason; Stage 2 never starts in that case.
 
 ### Exiting / cancelling
 Kiosk Mode has no way to exit from the UI: there is no title bar or close

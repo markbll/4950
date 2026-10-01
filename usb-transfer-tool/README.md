@@ -286,13 +286,12 @@ optional checkbox to also launch it automatically at sign-in (per-user
 Startup folder — no administrator rights needed) for a PC that's dedicated
 to intake.
 
-**Blocking a drive:** the same section has a **Blocked drives** list — click
-**Block a connected drive...** and pick from the currently-connected
-external drives to stop that specific drive from ever showing up as a
-Kiosk Mode source (e.g. a staff USB stick that should never be transferred).
-It's matched by the drive's volume serial number, so it still works if the
-drive letter changes; unblock it again with **Unblock selected**. Remember
-to click **Save configuration**.
+**Blocking a drive:** the same section has a **Blocked drives** box — type
+the drive letter(s) that should never be offered as a Kiosk Mode source
+(e.g. `C:` for the operating system drive), comma-separated. Unlike
+removable-drive detection, this is a simple, direct letter match, so it
+can't silently fail to recognise a drive. Remember to click **Save
+configuration**.
 
 **Notification sounds:** also in that section, optional `.wav` files can be
 set for **Transfer started / completed / error** — these are the same
@@ -301,14 +300,17 @@ sounds the main app's Options panel uses (`SoundStartPath`,
 them too without needing to open the full app.
 
 **Fast Transfer:** also in the Kiosk Mode section, tick **Enable Fast
-Transfer** and pick a **local fixed drive** from the dropdown (only real
-local drives on this PC are listed, refreshable). When enabled, a transfer
-runs in two stages instead of one:
+Transfer** and **Browse...** to pick the exact local folder Stage 1 should
+copy into (any local folder — not limited to a whole drive). When enabled,
+a transfer runs in two stages instead of one:
 
 - **Stage 1** — a fast, raw copy (no hashing or compression) from the
-  source drive straight to a folder on the chosen local drive
-  (`<drive>\Auto4950FastTransfer\<case>`). The card shows a live percentage
-  and an estimated time remaining while it runs.
+  source drive straight to `<chosen folder>\<case>`. The card shows a live
+  percentage and an estimated time remaining while it runs. Before Stage 1
+  starts, the free space at the chosen folder's drive is checked against
+  the source drive's size; if it wouldn't fit, Fast Transfer is skipped for
+  that job **silently** (no prompt, no error) and the normal single-stage
+  transfer runs instead, straight from the source drive.
 - Once Stage 1 finishes, the card turns **teal** and reads **"DRIVE SAFE TO
   REMOVE"** — the source drive can be disconnected at this point.
 - **Stage 2** starts automatically in the background from that local copy:
@@ -367,12 +369,12 @@ See `config.example.json`. Key settings:
 - **FontSize** — `Small`, `Medium` (default), `Large` or `ExtraLarge` — scales
   all text in the app.
 - **DarkMode** — `true` (default) for the dark theme, `false` for light.
-- **KioskBlockedDrives** — drives excluded from [Kiosk Mode](#kiosk-mode)'s
-  source list, each `{ "Serial": "<volume serial number>", "Label": "<for
-  display>" }`. Managed from Setup's **Blocked drives** list, not hand-edited.
+- **KioskBlockedDriveLetters** — drive letters (e.g. `["C:"]`) excluded from
+  [Kiosk Mode](#kiosk-mode)'s source list. Set from Setup's **Blocked
+  drives** box.
 - **KioskFastTransferEnabled / KioskFastTransferPath** — [Kiosk Mode](#kiosk-mode)'s
-  Fast Transfer option and its local staging folder (e.g. `D:\Auto4950FastTransfer`).
-  Managed from Setup's **Fast Transfer** section, not hand-edited.
+  Fast Transfer option and its local staging folder (any folder, e.g.
+  `D:\Intake`). Set from Setup's **Fast Transfer** section.
 
 ### Staging space guide
 

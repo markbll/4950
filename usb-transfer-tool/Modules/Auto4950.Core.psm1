@@ -56,16 +56,17 @@ function Get-DefaultConfig {
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
         # --- Kiosk Mode ----------------------------------------------------------
-        KioskBlockedDrives  = @()                       # Drives that cannot be selected as a Kiosk Mode source.
-                                                          # Array of @{ Serial = '<VolumeSerialNumber>'; Label = '<for display>' }.
-                                                          # Matched by volume serial number so it still applies if the
-                                                          # drive letter changes. Managed from Setup.ps1's Kiosk Mode section.
+        KioskBlockedDriveLetters = @()                   # Drive letters that cannot be selected as a Kiosk Mode
+                                                          # source (e.g. 'C:' for the system drive). Plain strings,
+                                                          # typed into Setup.ps1's Kiosk Mode section.
         KioskFastTransferEnabled = $false                # Copy from the source drive to a local drive first (Stage 1),
                                                           # so the drive can be removed before hashing/compression/network
                                                           # transfer (Stage 2) run. See Invoke-A4950FastPreCopy.
         KioskFastTransferPath    = ''                    # Local folder Stage 1 copies into, e.g. 'D:\Auto4950FastTransfer'.
-                                                          # Must be on a local fixed drive - managed from Setup.ps1's
-                                                          # Kiosk Mode section (Get-A4950LocalFixedDrives populates the choices).
+                                                          # Chosen directly (drive and location both) via a folder
+                                                          # browser in Setup.ps1's Kiosk Mode section. Skipped silently,
+                                                          # per job, if it doesn't have enough free space for that job's
+                                                          # source drive - see Start-KioskTransfer in the Kiosk script.
     }
 }
 
@@ -787,6 +788,32 @@ function Invoke-A4950FastPreCopy {
     return $result
 }
 
+function Test-A4950FastTransferFits {
+    <#
+    .SYNOPSIS Whether Kiosk Mode's Fast Transfer should run for this job.
+    .DESCRIPTION
+        True only when Fast Transfer is enabled, a destination path is
+        configured, and that destination currently has enough free space
+        to hold the source drive's contents. Fails closed (returns $false)
+        on any problem - destination unreachable, free space can't be
+        determined, etc. - so a misconfigured or momentarily-full Fast
+        Transfer destination never blocks a job or alerts the operator; it
+        just silently falls back to the normal single-stage transfer
+        straight from the source drive, same as Fast Transfer being off.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Config, [Parameter(Mandatory)][string]$SourcePath)
+    if (-not $Config.KioskFastTransferEnabled -or -not $Config.KioskFastTransferPath) { return $false }
+    try {
+        $sourceBytes = Get-A4950PathSizeBytes -Path $SourcePath
+        $free = Get-A4950FreeSpace -Path $Config.KioskFastTransferPath
+        if (-not $free.Ok) { return $false }
+        return ($free.FreeBytes -ge $sourceBytes)
+    } catch {
+        return $false
+    }
+}
+
 function Get-A4950UniqueName {
     <#
     .SYNOPSIS Build a destination file name that does not already exist, by
@@ -1043,6 +1070,11 @@ function Get-A4950FreeSpace {
         if ($Path -match '^[A-Za-z]:\\') {
             $qualifier = Split-Path -Qualifier $Path
             $di = [System.IO.DriveInfo]::new($qualifier)
+            # IsReady is checked explicitly rather than relying on
+            # .AvailableFreeSpace to throw for a missing/unready drive -
+            # that's true on Windows, but not guaranteed on every .NET
+            # platform, so this keeps the "fails closed" behaviour reliable.
+            if (-not $di.IsReady) { throw "Drive $qualifier is not ready." }
             $result.FreeBytes  = [int64]$di.AvailableFreeSpace
             $result.TotalBytes = [int64]$di.TotalSize
             $result.Ok = $true
@@ -1166,37 +1198,19 @@ function Get-A4950AvailableKioskDrives {
     <#
     .SYNOPSIS Kiosk Mode's selectable source drives - removable drives minus any blocked ones.
     .DESCRIPTION
-        Same list as Get-A4950RemovableDrives, with any drive whose volume
-        serial number matches Config.KioskBlockedDrives filtered out (see
-        Get-DefaultConfig - managed from Setup.ps1's Kiosk Mode section).
+        Same list as Get-A4950RemovableDrives, with any drive letter in
+        Config.KioskBlockedDriveLetters filtered out (see Get-DefaultConfig -
+        a plain list of drive letters typed into Setup.ps1's Kiosk Mode
+        section, e.g. 'C:' for the system drive). Matching is a simple,
+        case-insensitive drive-letter comparison - deliberately simpler than
+        matching by volume serial number, which proved unreliable in
+        practice.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Config)
-    $blocked = @($Config.KioskBlockedDrives | ForEach-Object { $_.Serial } | Where-Object { $_ })
+    $blocked = @($Config.KioskBlockedDriveLetters | ForEach-Object { ([string]$_).TrimEnd('\').ToUpperInvariant() } | Where-Object { $_ })
     if (-not $blocked.Count) { return @(Get-A4950RemovableDrives) }
-    return @(Get-A4950RemovableDrives | Where-Object { $_.VolumeSerialNumber -notin $blocked })
-}
-
-function Get-A4950LocalFixedDrives {
-    <#
-    .SYNOPSIS List local fixed drives (WMI DriveType 3) - candidates for Kiosk Mode's Fast Transfer staging area.
-    .DESCRIPTION
-        Used by Setup.ps1 to populate the "local drive for the fast copy"
-        picker: only local, fixed (non-removable, non-network) drives make
-        sense as a Stage 1 destination, since the whole point is a quick
-        local copy off the source drive. Returns Win32_LogicalDisk objects
-        (DeviceID, VolumeName, FreeSpace, Size). Fails closed (empty list)
-        if WMI is unavailable, same as Get-A4950RemovableDrives.
-    #>
-    [CmdletBinding()]
-    param()
-    try {
-        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
-            Where-Object { $_.DeviceID -and $_.DriveType -eq 3 } |
-            Sort-Object DeviceID)
-    } catch {
-        return @()
-    }
+    return @(Get-A4950RemovableDrives | Where-Object { $_.DeviceID.ToUpperInvariant() -notin $blocked })
 }
 
 function Write-A4950Log {
