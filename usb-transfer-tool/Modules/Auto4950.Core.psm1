@@ -35,21 +35,38 @@ function Get-DefaultConfig {
         CasePrefix          = 'CMS-A'                  # Enforced prefix for case numbers
         # --- Compression -------------------------------------------------------
         CompressionLevel    = 5                        # 0 (store) .. 9 (ultra)
-        ArchiveFormat       = 'zip'                     # zip | 7z
         VolumeSizeMB        = 2048                      # Split archives into volumes of this size (MB). 0 = no split
+        TransferMode        = 'Instant'                 # OnComplete | Instant - see New-A4950Archive
         Password            = ''                       # Optional AES-256 archive password (blank = none)
         # --- Hashing -----------------------------------------------------------
         HashAlgorithms      = @('SHA256', 'MD5')       # Original-file hashing
         EmbedManifest       = $true                    # Include hash manifest inside each archive
         # --- Behaviour ---------------------------------------------------------
         AutoPromptOnInsert  = $true                    # Show the action prompt when a USB drive appears
-        AutoTransfer        = $false                   # Start automatically on insert if a CMS case / OP name is set
         DefaultSelectAll    = $true                    # Pre-select all folders/files by default
-        VerifyAfterTransfer = $true                    # Re-hash the archive at destination
-        DeleteLocalArchive  = $true                    # Remove staged/temp files once confirmed transferred
         StagingFolder       = 'C:\temp'                # Where archives are staged before transfer
+        SlowMachineMode     = $false                   # Low CPU/RAM/GPU mode: no system monitor, single-threaded compression
+        # --- Sounds --------------------------------------------------------------
+        SoundStartPath      = ''                       # Optional .wav played when a job starts (blank = a plain beep)
+        SoundFinishPath     = ''                       # Optional .wav played when a job finishes (blank = Windows Asterisk)
+        SoundErrorPath      = ''                       # Optional .wav played on error (blank = Windows Hand/Critical Stop)
+        # --- Appearance ----------------------------------------------------------
+        FontSize            = 'Medium'                 # Small | Medium | Large | ExtraLarge
+        DarkMode            = $true                    # $false switches to a light theme
         # --- Excludes ----------------------------------------------------------
         ExcludePatterns     = @('System Volume Information', '$RECYCLE.BIN', 'Thumbs.db')
+        # --- Kiosk Mode ----------------------------------------------------------
+        KioskBlockedDriveLetters = @()                   # Drive letters that cannot be selected as a Kiosk Mode
+                                                          # source (e.g. 'C:' for the system drive). Plain strings,
+                                                          # typed into Setup.ps1's Kiosk Mode section.
+        KioskFastTransferEnabled = $false                # Copy from the source drive to a local drive first (Stage 1),
+                                                          # so the drive can be removed before hashing/compression/network
+                                                          # transfer (Stage 2) run. See Invoke-A4950FastPreCopy.
+        KioskFastTransferPath    = ''                    # Local folder Stage 1 copies into, e.g. 'D:\Auto4950FastTransfer'.
+                                                          # Chosen directly (drive and location both) via a folder
+                                                          # browser in Setup.ps1's Kiosk Mode section. Skipped silently,
+                                                          # per job, if it doesn't have enough free space for that job's
+                                                          # source drive - see Start-KioskTransfer in the Kiosk script.
     }
 }
 
@@ -262,14 +279,18 @@ function Invoke-A4950Process {
     .DESCRIPTION
         Starts a process, drains stdout/stderr asynchronously (no deadlock),
         and polls -CancelCheck every 150 ms. On cancel it kills the whole
-        process tree so the operation stops almost immediately.
+        process tree so the operation stops almost immediately. -OnTick, if
+        given, is also called on each ~150 ms poll while the process is still
+        running - used by New-A4950Archive's Instant transfer mode to notice
+        newly-finished archive volumes while 7-Zip is still working.
         Returns @{ ExitCode; Cancelled; Output }.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$Arguments,
-        [scriptblock]$CancelCheck
+        [scriptblock]$CancelCheck,
+        [scriptblock]$OnTick
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -298,6 +319,7 @@ function Invoke-A4950Process {
             try { if (-not $proc.HasExited) { $proc.Kill() } } catch {}
             break
         }
+        if ($OnTick) { & $OnTick }
     }
     try { $proc.WaitForExit(3000) | Out-Null } catch {}
 
@@ -329,45 +351,53 @@ function New-A4950Archive {
         [Parameter(Mandatory)][string[]]$SourcePath,   # one path, or several to combine into one archive
         [Parameter(Mandatory)][string]$ArchivePath,
         [ValidateRange(0, 9)][int]$Level = 5,
-        [ValidateSet('7z', 'zip')][string]$Format = 'zip',
         [int]$VolumeSizeMB = 0,          # >0 splits the archive into volumes of this size (MB)
         [string]$Password,
         [string[]]$ExcludePatterns,
         [string[]]$ExtraFiles,          # Additional files to add (e.g. the manifest)
         [scriptblock]$CancelCheck,      # Return $true to abort (kills 7-Zip)
         [scriptblock]$OnPartReady,      # Called with a produced file's path as soon as it is complete
-        [scriptblock]$OnOutput
+        [scriptblock]$OnOutput,
+        [switch]$LowResource,           # Slow Machine Mode: single-threaded, capped compression level
+        [ValidateSet('OnComplete', 'Instant')][string]$TransferMode = 'Instant'
     )
 
+    # Always native 7z: 7-Zip's own volume count (and a `7z t` pass) is the
+    # only thing a receiving tool can actually trust to detect a partial
+    # transfer - a raw byte split, or .zip's silently-ignored -v switch,
+    # can't offer that guarantee.
     $archiveDir = Split-Path -Parent $ArchivePath
     if (-not (Test-Path -LiteralPath $archiveDir)) {
         New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
     }
     $archiveLeaf = Split-Path -Leaf $ArchivePath
+    # TrimEnd('.') is defensive: a base name ending in a dot (however it got
+    # there) would otherwise leave a stray "..7z" double-dot once the "."
+    # separator is appended back for the extension.
+    $baseLeaf = ([System.IO.Path]::GetFileNameWithoutExtension($ArchivePath)).TrimEnd('.')
 
     # Remove any stale output from a previous run so volume detection is clean.
-    Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf*" -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $archiveDir -Filter "$baseLeaf.*" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
     # Build 7z argument list.  'a' = add, -mx = level, -t = type.
     # Multiple -SourcePath entries are added to the SAME archive in one pass,
-    # so several selected folders/files end up combined into a single zip.
+    # so several selected folders/files end up combined into a single archive.
     #
-    # NOTE: 7-Zip's -v (volumes) switch only splits the native 7z container -
-    # it silently does NOT split zip archives (7z.exe just writes one whole
-    # .zip and ignores -v). So for zip we build the complete archive here and
-    # split it ourselves afterwards (see Split-A4950File below); for 7z we let
-    # 7-Zip's own -v do it natively as before.
-    $splitZipOurselves = ($Format -eq 'zip' -and $VolumeSizeMB -gt 0)
+    # Slow Machine Mode trades compression ratio for the smallest possible CPU
+    # footprint: store (no compression math, just I/O) and single-threaded,
+    # regardless of the Level the operator has set. Hashing and the manifest
+    # are unaffected - only the compression cost changes.
+    $effectiveLevel = if ($LowResource) { 0 } else { $Level }
     $szArgs = [System.Collections.Generic.List[string]]::new()
-    $szArgs.AddRange([string[]]@('a', "-t$Format", "-mx=$Level", '-y', $ArchivePath))
+    $szArgs.AddRange([string[]]@('a', '-t7z', "-mx=$effectiveLevel", '-y', $ArchivePath))
     foreach ($sp in $SourcePath) { $szArgs.Add($sp) }
-    if ($Format -eq '7z') { $szArgs.Add('-mmt=on') }          # multi-threaded
-    if ($VolumeSizeMB -gt 0 -and -not $splitZipOurselves) { $szArgs.Add("-v${VolumeSizeMB}m") }   # 7z native volumes
+    if ($LowResource) { $szArgs.Add('-mmt=off') } else { $szArgs.Add('-mmt=on') }   # multi-threaded compression
+    if ($VolumeSizeMB -gt 0) { $szArgs.Add("-v${VolumeSizeMB}m") }   # native 7z volumes
     if ($ExtraFiles)      { foreach ($ef in $ExtraFiles) { $szArgs.Add($ef) } }
     if ($Password) {
         $szArgs.Add("-p$Password")
-        if ($Format -eq '7z') { $szArgs.Add('-mhe=on') }      # encrypt headers too
+        $szArgs.Add('-mhe=on')   # encrypt headers too
     }
     if ($ExcludePatterns) {
         foreach ($x in $ExcludePatterns) { $szArgs.Add("-xr!$x") }
@@ -383,7 +413,43 @@ function New-A4950Archive {
         Output      = ''
     }
 
-    $run = Invoke-A4950Process -FilePath $SevenZipPath -Arguments $szArgs -CancelCheck $CancelCheck
+    # Instant transfer mode: while 7-Zip is still running, poll for volumes it
+    # has already finished writing and report them via -OnPartReady right
+    # away, instead of waiting for the whole archive. 7-Zip's own writing
+    # behaviour makes this safe: each volume is written to a "<name>.tmp"
+    # file and only renamed to its final "<base>.7z.NNN" name once its
+    # content is completely flushed and will never be touched again -
+    # confirmed empirically against real 7-Zip 23.01, timestamping every
+    # volume rename during a live multi-volume compress. The one volume this
+    # can never speed up is .001: 7-Zip defers finalising it until the very
+    # end (the archive's start header can only be written once the whole
+    # body is known), at the same instant as the last volume - so .001 is
+    # always excluded here and only ever reported in the final batch below,
+    # which also matches the existing "always transfer .001 last" behaviour.
+    # A same-name volume is never reported twice: $reportedVols is checked
+    # again in the final batch below, after 7-Zip has fully exited.
+    $reportedVols = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $onTick = $null
+    if ($TransferMode -eq 'Instant' -and $VolumeSizeMB -gt 0 -and $OnPartReady) {
+        $onTick = {
+            $found = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.\d{3}$' -and $_.Name -notmatch '\.001$' -and -not $reportedVols.Contains($_.Name) }
+            foreach ($f in $found) {
+                # Defense in depth beyond the .tmp-name signal above: confirm
+                # nothing else still has the file open for writing before
+                # treating it as safe to move. Best-effort - reliable file
+                # locking semantics are OS-specific, so this is a second
+                # check on top of (never a replacement for) the rename signal.
+                $locked = $true
+                try { ([System.IO.File]::Open($f.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)).Dispose(); $locked = $false } catch {}
+                if ($locked) { continue }
+                [void]$reportedVols.Add($f.Name)
+                & $OnPartReady $f.FullName
+            }
+        }.GetNewClosure()
+    }
+
+    $run = Invoke-A4950Process -FilePath $SevenZipPath -Arguments $szArgs -CancelCheck $CancelCheck -OnTick $onTick
     $result.ExitCode  = $run.ExitCode
     $result.Output    = $run.Output
     $result.Cancelled = $run.Cancelled
@@ -395,132 +461,36 @@ function New-A4950Archive {
         return $result
     }
 
-    if ($splitZipOurselves) {
-        # zip: 7-Zip wrote one complete file at $ArchivePath - split it ourselves
-        # into .001/.002/... parts of the requested size, then remove the whole
-        # file so only the parts remain (matching 7-Zip's own -v behaviour).
-        # We read/write strictly in order (.001 fully closed before .002 starts),
-        # so -OnPartReady fires per part in true completion order, letting the
-        # caller start transferring .001 immediately rather than waiting for
-        # the whole split to finish.
-        if (Test-Path -LiteralPath $ArchivePath) {
-            $split = Split-A4950File -Path $ArchivePath -ChunkBytes ([int64]$VolumeSizeMB * 1MB) `
-                        -CancelCheck $CancelCheck -OnPartReady $OnPartReady
-            if ($split.Cancelled) {
-                $result.Cancelled = $true
-                Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
-                    Remove-Item -Force -ErrorAction SilentlyContinue
-                return $result
-            }
-            if ($split.Success -and $split.Parts.Count -gt 0) {
-                Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
-                $result.Files = @($split.Parts)
-            } else {
-                $result.Files = @($ArchivePath)   # splitting failed - fall back to the whole file
-                if ($OnPartReady) { & $OnPartReady $ArchivePath }
-            }
-        }
+    # Final, authoritative pass: every volume (or the unsplit archive) is only
+    # KNOWN to exist, and only guaranteed complete, once 7z.exe has fully
+    # exited - the process is a black box while running. In OnComplete mode
+    # (the default) nothing was reported above, so every volume is reported
+    # here, together, in one batch. In Instant mode most volumes were already
+    # reported live as 7-Zip finished each one (see $onTick above); this pass
+    # picks up whatever wasn't - always including .001, and covering the
+    # OnComplete case identically to before. Volumes are left exactly as
+    # 7-Zip names them - "<base>.7z.001", "<base>.7z.002", ... - so the
+    # on-disk name always signals the real container format, and a receiver
+    # testing them with `7z t`/`7z l` gets 7-Zip's own genuine, verified
+    # volume count.
+    if ($VolumeSizeMB -gt 0) {
+        $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
+        if ($vols) { $result.Files = @($vols.FullName) }
+        elseif (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }  # not actually split
+    } else {
+        if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
     }
-    else {
-        # 7z's own -v volumes (or an unsplit archive of either format) are only
-        # known to exist, and only guaranteed complete, once 7z.exe has fully
-        # exited - the process is a black box while running, and 7-Zip does not
-        # necessarily finalise volumes in ascending numeric order internally
-        # (e.g. the FIRST volume can be the LAST one it finishes writing), so
-        # there is no safe way to start transferring any of its volumes early.
-        # All produced files are reported via -OnPartReady together, in one
-        # batch, only after the process has completed.
-        if ($VolumeSizeMB -gt 0) {
-            # With -v, 7-Zip writes <archive>.001, .002, ...
-            $vols = Get-ChildItem -LiteralPath $archiveDir -Filter "$archiveLeaf.*" -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name
-            if ($vols) { $result.Files = @($vols.FullName) }
-            elseif (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }  # not actually split
-        } else {
-            if (Test-Path -LiteralPath $ArchivePath) { $result.Files = @($ArchivePath) }
+    if ($OnPartReady) {
+        foreach ($f in $result.Files) {
+            if ($reportedVols.Contains((Split-Path -Leaf $f))) { continue }   # already reported live, above
+            & $OnPartReady $f
         }
-        if ($OnPartReady) { foreach ($f in $result.Files) { & $OnPartReady $f } }
     }
 
     # 7-Zip exit codes: 0 = OK, 1 = warning (still usable).
     $result.Success = ($result.ExitCode -in 0, 1) -and ($result.Files.Count -gt 0)
     return $result
-}
-
-function Split-A4950File {
-    <#
-    .SYNOPSIS Split a file into fixed-size .001, .002, ... parts (raw byte split).
-    .DESCRIPTION
-        Used for zip archives, since 7-Zip's -v volume switch does not support
-        the zip container format (it silently produces one whole file instead).
-        The parts are plain sequential byte chunks - reassemble by concatenating
-        them in order, e.g. on Windows:
-            copy /b archive.zip.001+archive.zip.002+archive.zip.003 archive.zip
-        This is the same mechanism 7-Zip's own volumes use internally, so the
-        parts are handled identically by the rest of the pipeline (transfer,
-        naming, "open the .001" instructions).
-
-        We read and write strictly in order - .001 is opened, fully written and
-        CLOSED before .002 is even created - so each part's completion is known
-        exactly and in true numeric order. -OnPartReady is invoked with a part's
-        full path immediately after it is closed (fully flushed to disk), so a
-        caller can start transferring it right away instead of waiting for the
-        whole file to be split. It is never called for a part that was still
-        being written when cancellation happened.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][int64]$ChunkBytes,
-        [scriptblock]$CancelCheck,
-        [scriptblock]$OnPartReady
-    )
-    $parts = New-Object System.Collections.Generic.List[string]
-    # Cast both args to [int64] explicitly - PowerShell's overload resolution
-    # can otherwise pick Math.Min(Int32,Int32) and fail converting a >2GB
-    # ChunkBytes value into Int32 ("value was either too large or too small").
-    $bufSize = [int][Math]::Min([int64]$ChunkBytes, [int64]4MB)
-    $buffer = New-Object byte[] $bufSize
-    $partIndex = 0
-    $cancelled = $false
-
-    $in = [System.IO.File]::OpenRead($Path)
-    try {
-        while ($in.Position -lt $in.Length) {
-            if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
-            $partIndex++
-            $partPath = "{0}.{1:D3}" -f $Path, $partIndex
-            $partOk = $false
-            $out = [System.IO.File]::OpenWrite($partPath)
-            try {
-                $remaining = $ChunkBytes
-                while ($remaining -gt 0 -and $in.Position -lt $in.Length) {
-                    if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
-                    $toRead = [int][Math]::Min([int64]$buffer.Length, [int64]$remaining)
-                    $n = $in.Read($buffer, 0, $toRead)
-                    if ($n -le 0) { break }
-                    $out.Write($buffer, 0, $n)
-                    $remaining -= $n
-                }
-                if (-not $cancelled) { $partOk = $true }
-            } finally { $out.Dispose() }   # fully flushed and closed at this point
-            if ($cancelled) {
-                Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
-                break
-            }
-            if ($partOk) {
-                $parts.Add($partPath)
-                if ($OnPartReady) { & $OnPartReady $partPath }   # safe: this part is complete and closed
-            }
-        }
-    } finally { $in.Dispose() }
-
-    if ($cancelled) {
-        foreach ($p in $parts) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
-        return [pscustomobject]@{ Success = $false; Cancelled = $true; Parts = @() }
-    }
-    return [pscustomobject]@{ Success = $true; Cancelled = $false; Parts = @($parts) }
 }
 
 #endregion
@@ -537,13 +507,39 @@ function Get-A4950FileHashes {
         [Parameter(Mandatory)][string]$Path,
         [string[]]$Algorithms = @('SHA256', 'MD5')
     )
+    # Single-pass streaming hash: when SHA-256 and MD5 are both requested
+    # (the default), reading the file once and feeding both hashers per
+    # chunk avoids reading a large file from disk twice.
     $out = @{}
+    $hashers = @{}
     foreach ($alg in $Algorithms) {
-        try {
-            $out[$alg] = (Get-FileHash -LiteralPath $Path -Algorithm $alg).Hash
-        } catch {
-            $out[$alg] = "ERROR: $($_.Exception.Message)"
+        $hashers[$alg] = switch ($alg) {
+            'SHA256' { [System.Security.Cryptography.SHA256]::Create() }
+            'MD5'    { [System.Security.Cryptography.MD5]::Create() }
+            default  { [System.Security.Cryptography.HashAlgorithm]::Create($alg) }
         }
+    }
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $buffer = New-Object byte[] 1MB
+            $read = 0
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                foreach ($h in $hashers.Values) { $h.TransformBlock($buffer, 0, $read, $null, 0) | Out-Null }
+            }
+            $empty = [byte[]]::new(0)
+            foreach ($h in $hashers.Values) { $h.TransformFinalBlock($empty, 0, 0) | Out-Null }
+            foreach ($alg in $Algorithms) {
+                $out[$alg] = [System.BitConverter]::ToString($hashers[$alg].Hash).Replace('-', '')
+            }
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        $msg = "ERROR: $($_.Exception.Message)"
+        foreach ($alg in $Algorithms) { $out[$alg] = $msg }
+    } finally {
+        foreach ($h in $hashers.Values) { $h.Dispose() }
     }
     return $out
 }
@@ -591,11 +587,18 @@ function New-A4950Manifest {
         if ($OnProgress) { & $OnProgress $i $total $f.FullName }
         $h = Get-A4950FileHashes -Path $f.FullName -Algorithms $Algorithms
         $rel = $f.FullName
-        if ($f.FullName.Length -gt $e.Root.Length -and $f.FullName.StartsWith($e.Root)) {
+        if ($f.FullName -eq $e.Root) {
+            # The selected item IS this file (a standalone file was ticked,
+            # not a folder) - nothing to append beyond its own name.
+            $rel = ''
+        } elseif ($f.FullName.Length -gt $e.Root.Length -and $f.FullName.StartsWith($e.Root)) {
             $rel = $f.FullName.Substring($e.Root.Length).TrimStart('\', '/')
         }
         if ([string]::IsNullOrWhiteSpace($rel)) { $rel = $f.Name }
-        if ($multi) { $rel = "$($e.Label)\$rel" }   # disambiguate across combined top-level items
+        # Disambiguate across combined top-level items - but not when $rel is
+        # already just the label (a standalone file), which would otherwise
+        # duplicate it, e.g. "IMG_001.jpg\IMG_001.jpg".
+        if ($multi -and $rel -ne $e.Label) { $rel = "$($e.Label)\$rel" }
         $rec = [ordered]@{
             RelativePath = $rel
             SizeBytes    = $f.Length
@@ -681,7 +684,10 @@ function Copy-A4950ToShare {
         $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
         if ($robocopy -and $destName -eq $srcName) {
             # robocopy keeps the same file name; fast path.
-            $rcArgs = @($srcDir, $DestinationFolder, $srcName, '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
+            # /Z = restartable mode - a dropped network connection resumes
+            # from the last checkpoint instead of re-copying the whole file.
+            # /J = unbuffered I/O for large sequential files.
+            $rcArgs = @($srcDir, $DestinationFolder, $srcName, '/Z', '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
             $run = Invoke-A4950Process -FilePath $robocopy.Source -Arguments $rcArgs -CancelCheck $CancelCheck
             $result.ExitCode  = $run.ExitCode
             $result.Cancelled = $run.Cancelled
@@ -704,11 +710,115 @@ function Copy-A4950ToShare {
     return $result
 }
 
+function Invoke-A4950FastPreCopy {
+    <#
+    .SYNOPSIS Kiosk Mode "Fast Transfer" Stage 1: raw copy from the source drive to a local staging folder.
+    .DESCRIPTION
+        No hashing or compression happens here - it is a byte-for-byte copy,
+        done ONLY so the source drive (USB/external HDD) can be removed as
+        soon as it finishes, instead of staying connected through hashing,
+        compression and the network transfer too (Stage 2 - unchanged, runs
+        against this function's DestinationPath via the normal
+        Invoke-A4950TransferJob pipeline).
+
+        Prefers robocopy (resilient, restartable) with a recursive Copy-Item
+        fallback, same pattern as Copy-A4950ToShare. Progress is reported via
+        -OnProgress by polling the destination folder's cumulative size
+        against the source's total size while the copy runs - the same
+        "poll a background process's output on a timer" approach
+        New-A4950Archive's Instant transfer mode uses for volume detection.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [scriptblock]$CancelCheck,
+        [scriptblock]$OnProgress   # called with @{ CopiedBytes; TotalBytes; ElapsedSeconds }
+    )
+
+    $result = [pscustomobject]@{ Success = $false; Cancelled = $false; DestinationPath = $DestinationPath; Error = '' }
+    try {
+        if ($CancelCheck -and (& $CancelCheck)) {
+            $result.Cancelled = $true
+        } else {
+            if (-not (Test-Path -LiteralPath $DestinationPath)) {
+                New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+            }
+            $totalBytes = Get-A4950PathSizeBytes -Path $SourcePath
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+            $onTick = $null
+            if ($OnProgress) {
+                $onTick = {
+                    $copied = 0
+                    try {
+                        $sum = (Get-ChildItem -LiteralPath $DestinationPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                        if ($sum) { $copied = [int64]$sum }
+                    } catch {}
+                    & $OnProgress @{ CopiedBytes = $copied; TotalBytes = $totalBytes; ElapsedSeconds = $sw.Elapsed.TotalSeconds }
+                }.GetNewClosure()
+            }
+
+            $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
+            if ($robocopy) {
+                # /E = include subfolders (even empty ones), /Z = restartable mode,
+                # /J = unbuffered I/O, /R:2 /W:3 = don't hang on a flaky USB file.
+                $rcArgs = @($SourcePath, $DestinationPath, '/E', '/Z', '/J', '/R:2', '/W:3', '/NP', '/NDL', '/NJH', '/NJS')
+                $run = Invoke-A4950Process -FilePath $robocopy.Source -Arguments $rcArgs -CancelCheck $CancelCheck -OnTick $onTick
+                $result.Cancelled = $run.Cancelled
+                # Robocopy exit codes 0-7 are all "success" (8+ means failure).
+                $result.Success = (-not $run.Cancelled) -and ($run.ExitCode -lt 8)
+                if (-not $result.Success -and -not $run.Cancelled) { $result.Error = "robocopy exit code $($run.ExitCode)" }
+            } else {
+                # No robocopy (non-Windows test hosts, or a locked-down machine): best-effort
+                # recursive copy. -Path (not -LiteralPath) is required here so the trailing
+                # '*' actually expands as a wildcard instead of being searched for literally.
+                Copy-Item -Path (Join-Path $SourcePath '*') -Destination $DestinationPath -Recurse -Force -ErrorAction Stop
+                if ($onTick) { & $onTick }
+                $result.Success = $true
+            }
+        }
+        if ($result.Cancelled) {
+            Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        $result.Error = $_.Exception.Message
+        $result.Success = $false
+    }
+    return $result
+}
+
+function Test-A4950FastTransferFits {
+    <#
+    .SYNOPSIS Whether Kiosk Mode's Fast Transfer should run for this job.
+    .DESCRIPTION
+        True only when Fast Transfer is enabled, a destination path is
+        configured, and that destination currently has enough free space
+        to hold the source drive's contents. Fails closed (returns $false)
+        on any problem - destination unreachable, free space can't be
+        determined, etc. - so a misconfigured or momentarily-full Fast
+        Transfer destination never blocks a job or alerts the operator; it
+        just silently falls back to the normal single-stage transfer
+        straight from the source drive, same as Fast Transfer being off.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Config, [Parameter(Mandatory)][string]$SourcePath)
+    if (-not $Config.KioskFastTransferEnabled -or -not $Config.KioskFastTransferPath) { return $false }
+    try {
+        $sourceBytes = Get-A4950PathSizeBytes -Path $SourcePath
+        $free = Get-A4950FreeSpace -Path $Config.KioskFastTransferPath
+        if (-not $free.Ok) { return $false }
+        return ($free.FreeBytes -ge $sourceBytes)
+    } catch {
+        return $false
+    }
+}
+
 function Get-A4950UniqueName {
     <#
     .SYNOPSIS Build a destination file name that does not already exist, by
               inserting a date/time stamp before the first extension.
-    .EXAMPLE  case__Photos.zip.001  ->  case__Photos_20260727_143000.zip.001
+    .EXAMPLE  case__Photos.001  ->  case__Photos_20260727_143000.001
     #>
     [CmdletBinding()]
     param(
@@ -738,7 +848,15 @@ function Write-A4950TransferLog {
         [Parameter(Mandatory)][string]$LogPath,
         [Parameter(Mandatory)]$Records,       # objects: Name, Sha256, SizeBytes, TransferredUtc
         [string]$Reference = '',
-        [switch]$Failed
+        [switch]$Failed,
+        [string]$Source = '',
+        [string]$Destination = '',
+        $StartTime = $null,                  # [DateTime], local time
+        $FinishTime = $null,                 # [DateTime], local time
+        [int]$FileCount = 0,                 # original (uncompressed) file count
+        [int]$FolderCount = 0,               # original folder count
+        [int64]$TotalBytes = 0,              # original (uncompressed) total size
+        [int64]$CompressedBytes = 0          # size actually written to the destination (archive/volumes)
     )
     $sb = New-Object System.Text.StringBuilder
     if ($Failed) {
@@ -750,9 +868,15 @@ function Write-A4950TransferLog {
     }
     [void]$sb.AppendLine('==========================================================')
     [void]$sb.AppendLine("Reference     : $Reference")
+    if ($Source)      { [void]$sb.AppendLine("Source        : $Source") }
+    if ($Destination) { [void]$sb.AppendLine("Destination   : $Destination") }
+    if ($StartTime)   { [void]$sb.AppendLine("Started       : $($StartTime.ToString('yyyy-MM-dd HH:mm:ss'))") }
+    if ($FinishTime)  { [void]$sb.AppendLine("Finished      : $($FinishTime.ToString('yyyy-MM-dd HH:mm:ss'))") }
     [void]$sb.AppendLine("Generated UTC : $([DateTime]::UtcNow.ToString('o'))")
     [void]$sb.AppendLine("Machine       : $env:COMPUTERNAME")
     [void]$sb.AppendLine("Operator      : $env:USERNAME")
+    [void]$sb.AppendLine("Original      : $FileCount file(s), $FolderCount folder(s), $(Format-A4950Bytes $TotalBytes)")
+    [void]$sb.AppendLine("Compressed    : $(Format-A4950Bytes $CompressedBytes)")
     [void]$sb.AppendLine("Files copied  : $(@($Records).Count)")
     [void]$sb.AppendLine('')
     foreach ($r in @($Records)) {
@@ -766,28 +890,6 @@ function Write-A4950TransferLog {
     if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $sb.ToString() | Set-Content -LiteralPath $LogPath -Encoding UTF8
     return $LogPath
-}
-
-function Test-A4950TransferIntegrity {
-    <#
-    .SYNOPSIS Verify a transferred file matches the source by SHA-256.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$SourceFile,
-        [Parameter(Mandatory)][string]$DestinationFile
-    )
-    if (-not (Test-Path -LiteralPath $DestinationFile)) {
-        return [pscustomobject]@{ Match = $false; Reason = 'Destination file missing' }
-    }
-    $s = (Get-FileHash -LiteralPath $SourceFile -Algorithm SHA256).Hash
-    $d = (Get-FileHash -LiteralPath $DestinationFile -Algorithm SHA256).Hash
-    return [pscustomobject]@{
-        Match       = ($s -eq $d)
-        SourceHash  = $s
-        DestHash    = $d
-        Reason      = if ($s -eq $d) { 'OK' } else { 'SHA-256 mismatch' }
-    }
 }
 
 #endregion
@@ -868,6 +970,41 @@ function Get-A4950SystemStats {
 
 #region ------------------------------------------------------------ Free space & compression estimate
 
+function Get-A4950SelectionStats {
+    <#
+    .SYNOPSIS Count files and folders and sum their size across the top-level selected items.
+    .DESCRIPTION
+        Runs independently of hashing/manifest generation, so file/folder counts
+        and total size are available even when EmbedManifest is off (e.g. Quick
+        Transfer) - used for the activity log summary, the transfer log header,
+        and the on-screen completion message.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$SourcePath)
+    $fileCount = 0; $folderCount = 0; $totalBytes = 0L
+    foreach ($root in $SourcePath) {
+        if (Test-Path -LiteralPath $root -PathType Container) {
+            $folderCount++   # the top-level folder itself
+            try {
+                $dirs = @(Get-ChildItem -LiteralPath $root -Recurse -Directory -Force -ErrorAction SilentlyContinue)
+                $folderCount += $dirs.Count
+            } catch {}
+            try {
+                $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction SilentlyContinue)
+                $fileCount += $files.Count
+                if ($files.Count -gt 0) {
+                    $sum = ($files | Measure-Object -Property Length -Sum).Sum
+                    if ($sum) { $totalBytes += [int64]$sum }
+                }
+            } catch {}
+        } elseif (Test-Path -LiteralPath $root) {
+            $fileCount++
+            try { $totalBytes += [int64](Get-Item -LiteralPath $root -ErrorAction Stop).Length } catch {}
+        }
+    }
+    [pscustomobject]@{ FileCount = $fileCount; FolderCount = $folderCount; TotalBytes = $totalBytes }
+}
+
 function Format-A4950Bytes {
     <#
     .SYNOPSIS Human-readable byte size, e.g. 1536000000 -> "1.43 GB".
@@ -909,12 +1046,11 @@ function Get-A4950CompressionRatio {
     #>
     [CmdletBinding()]
     param(
-        [ValidateRange(0, 9)][int]$Level,
-        [ValidateSet('7z', 'zip')][string]$Format = 'zip'
+        [ValidateRange(0, 9)][int]$Level
     )
     $table = @{ 0 = 1.00; 1 = 0.92; 2 = 0.87; 3 = 0.82; 4 = 0.75; 5 = 0.68; 6 = 0.62; 7 = 0.58; 8 = 0.55; 9 = 0.52 }
     $ratio = $table[$Level]
-    if ($Format -eq '7z' -and $Level -gt 0) { $ratio *= 0.93 }   # 7z format typically edges out zip
+    if ($Level -gt 0) { $ratio *= 0.93 }   # native 7z format typically edges out zip
     return [math]::Round($ratio, 3)
 }
 
@@ -934,6 +1070,11 @@ function Get-A4950FreeSpace {
         if ($Path -match '^[A-Za-z]:\\') {
             $qualifier = Split-Path -Qualifier $Path
             $di = [System.IO.DriveInfo]::new($qualifier)
+            # IsReady is checked explicitly rather than relying on
+            # .AvailableFreeSpace to throw for a missing/unready drive -
+            # that's true on Windows, but not guaranteed on every .NET
+            # platform, so this keeps the "fails closed" behaviour reliable.
+            if (-not $di.IsReady) { throw "Drive $qualifier is not ready." }
             $result.FreeBytes  = [int64]$di.AvailableFreeSpace
             $result.TotalBytes = [int64]$di.TotalSize
             $result.Ok = $true
@@ -953,28 +1094,6 @@ function Get-A4950FreeSpace {
     return $result
 }
 
-function Get-A4950SuggestedCompression {
-    <#
-    .SYNOPSIS Find the fastest format/level whose estimated size fits in the free space.
-    .OUTPUTS $null if nothing fits, even at maximum (level 9, 7z) compression.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][int64]$SourceBytes,
-        [Parameter(Mandatory)][int64]$FreeBytes
-    )
-    foreach ($fmt in @('zip', '7z')) {
-        for ($lvl = 0; $lvl -le 9; $lvl++) {
-            $ratio = Get-A4950CompressionRatio -Level $lvl -Format $fmt
-            $est = [int64]($SourceBytes * $ratio * 1.02)   # +2% archive/manifest overhead
-            if ($est -lt $FreeBytes) {
-                return [pscustomobject]@{ Level = $lvl; Format = $fmt; EstimatedBytes = $est }
-            }
-        }
-    }
-    return $null
-}
-
 #endregion
 
 #region ------------------------------------------------------------ Logging & utilities
@@ -982,12 +1101,19 @@ function Get-A4950SuggestedCompression {
 function New-A4950CaseFolderName {
     <#
     .SYNOPSIS Sanitise a case number into a filesystem-safe name.
+    .DESCRIPTION
+        A trailing "." is a legal filename character but, left in place,
+        collides with the "." that separates the archive extension - e.g. a
+        case number typed as "CMS-A12345." would otherwise produce
+        "CMS-A12345..7z" (double dot). Trimmed here, along with trailing
+        spaces (Windows itself silently drops trailing dots/spaces from
+        names, so this only removes characters that wouldn't survive anyway).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$CaseNumber)
     $invalid = [IO.Path]::GetInvalidFileNameChars() -join ''
     $pattern = "[{0}]" -f [regex]::Escape($invalid)
-    ($CaseNumber -replace $pattern, '_').Trim()
+    ($CaseNumber -replace $pattern, '_').Trim().TrimEnd('.', ' ')
 }
 
 function Test-A4950CaseNumber {
@@ -1018,6 +1144,75 @@ function Test-A4950OpName {
     return $true
 }
 
+function Get-A4950AllDrives {
+    <#
+    .SYNOPSIS List every drive letter Windows exposes - fixed, removable, network, everything.
+    .DESCRIPTION
+        No DriveType/interface filtering at all - used by Kiosk Mode's
+        source-drive list and Setup's Fast Transfer destination picker.
+        Earlier versions tried to auto-detect "external/removable" or
+        "local fixed" drives via Win32_LogicalDisk.DriveType and
+        Win32_DiskDrive.InterfaceType; that heuristic proved unreliable in
+        practice (some USB-attached drives, and in some environments WMI
+        itself, don't report the way Windows' own drive-type model assumes,
+        leaving the picker empty even with a drive connected). This instead
+        shows everything and leaves the judgement to the operator/admin -
+        same approach the main app's own "Source drive" dropdown already
+        uses - with Kiosk Mode's KioskBlockedDriveLetters list (see
+        Get-A4950AvailableKioskDrives) as the actual safeguard, e.g.
+        against picking the system drive.
+
+        Falls back to Get-PSDrive if WMI/CIM itself is unavailable or
+        returns nothing, instead of silently returning an empty list either
+        way.
+    #>
+    [CmdletBinding()]
+    param()
+    try {
+        $disks = @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop | Where-Object { $_.DeviceID } | Sort-Object DeviceID)
+        if ($disks.Count -gt 0) { return $disks }
+    } catch {}
+    return @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^[A-Za-z]$' } |
+        Sort-Object Name |
+        ForEach-Object { [pscustomobject]@{ DeviceID = "$($_.Name):"; VolumeName = $_.Description } })
+}
+
+function ConvertTo-A4950DriveLetter {
+    <#
+    .SYNOPSIS Normalize a drive-letter string (e.g. 'c', 'D:\', 'e:') to the "X:" form Win32_LogicalDisk.DeviceID uses.
+    .DESCRIPTION
+        Shared by Setup.ps1 (saving KioskBlockedDriveLetters) and
+        Get-A4950AvailableKioskDrives (matching against it), so a drive
+        letter typed without a trailing colon, or pasted with a trailing
+        backslash, still matches correctly either way.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Letter)
+    $l = $Letter.Trim().TrimEnd('\').ToUpperInvariant()
+    if ($l -and $l -notmatch ':$') { $l = "$l`:" }
+    return $l
+}
+
+function Get-A4950AvailableKioskDrives {
+    <#
+    .SYNOPSIS Kiosk Mode's selectable source drives - every drive minus any blocked ones.
+    .DESCRIPTION
+        All drives (see Get-A4950AllDrives), with any drive letter in
+        Config.KioskBlockedDriveLetters filtered out (see Get-DefaultConfig -
+        a plain list of drive letters typed into Setup.ps1's Kiosk Mode
+        section, e.g. 'C:' for the system drive). This is Kiosk Mode's only
+        safeguard against an unwanted drive being selected - no removable/
+        external detection is applied beneath it.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Config)
+    $blocked = @($Config.KioskBlockedDriveLetters | Where-Object { $_ } | ForEach-Object { ConvertTo-A4950DriveLetter $_ })
+    $all = @(Get-A4950AllDrives)
+    if (-not $blocked.Count) { return $all }
+    return @($all | Where-Object { $_.DeviceID.ToUpperInvariant() -notin $blocked })
+}
+
 function Write-A4950Log {
     <#
     .SYNOPSIS Append a timestamped, levelled line to a log file.
@@ -1032,7 +1227,6 @@ function Write-A4950Log {
     $dir = Split-Path -Parent $Path
     if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Add-Content -LiteralPath $Path -Value $line -Encoding UTF8
-    return $line
 }
 
 #endregion
