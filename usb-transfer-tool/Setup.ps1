@@ -141,13 +141,11 @@ $configPath = Get-ConfigPath
     <TextBlock Text="Fast Transfer (optional)" Foreground="#FFECECEC" FontWeight="SemiBold" Margin="0,4,0,2"/>
     <TextBlock Text="Copies the drive's contents to a local folder first (Stage 1 - no hashing/compression, just a fast raw copy), then hashes, compresses and sends to the network destination in the background (Stage 2). Lets the USB/external drive be removed as soon as Stage 1 finishes, instead of staying connected for the whole job." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
     <CheckBox x:Name="FastTransferEnabled" Content="Enable Fast Transfer" Foreground="#FFECECEC" Margin="0,0,0,8"/>
-    <TextBlock Text="Local drive for the Stage 1 copy" Foreground="#FF9AA0A6" FontSize="11"/>
-    <DockPanel Margin="0,2,0,8">
-      <Button x:Name="BtnFastDriveRefresh" Content="Refresh" DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
-      <ComboBox x:Name="FastDrive" Padding="6" Background="#FF20202A" Foreground="#FFECECEC"/>
+    <TextBlock Text="Local folder for the Stage 1 copy" Foreground="#FF9AA0A6" FontSize="11"/>
+    <DockPanel Margin="0,2,0,4">
+      <Button x:Name="BtnFastBrowse" Content="Browse..." DockPanel.Dock="Right" Padding="12,4" Margin="6,0,0,0" Foreground="#FF202020"/>
+      <TextBox x:Name="FastPath" Padding="6" Background="#FF20202A" Foreground="#FFECECEC"/>
     </DockPanel>
-    <TextBlock Text="Location (folder) on that drive" Foreground="#FF9AA0A6" FontSize="11"/>
-    <TextBox x:Name="FastLocation" Padding="6" Background="#FF20202A" Foreground="#FFECECEC" Margin="0,2,0,4"/>
     <TextBlock Text="If this folder doesn't have enough free space for a given drive when a transfer starts, Fast Transfer is skipped for that job and the normal single-stage transfer runs instead - silently, no prompt." Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,4"/>
     <TextBlock x:Name="FastTransferStatus" Foreground="#FF9AA0A6" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
@@ -200,40 +198,8 @@ $g = { param($n) $w.FindName($n) }
 (& $g 'SoundError').Text  = $config.SoundErrorPath
 
 (& $g 'FastTransferEnabled').IsChecked = [bool]$config.KioskFastTransferEnabled
+(& $g 'FastPath').Text = $config.KioskFastTransferPath
 (& $g 'BlockedLetters').Text = ($config.KioskBlockedDriveLetters -join ', ')
-
-$script:FastLocationDefault = 'Auto4950FastTransfer'
-function Update-FastDriveChoices {
-    $currentDeviceId = $null
-    $currentLocation = $script:FastLocationDefault
-    if ($config.KioskFastTransferPath) {
-        $parts = $config.KioskFastTransferPath -split '\\', 2
-        $currentDeviceId = $parts[0]
-        if ($parts.Count -gt 1 -and $parts[1]) { $currentLocation = $parts[1] }
-    }
-    (& $g 'FastLocation').Text = $currentLocation
-
-    (& $g 'FastDrive').Items.Clear()
-    $drives = @(Get-A4950AllDrives)
-    foreach ($d in $drives) {
-        $freeGb = [math]::Round($d.FreeSpace / 1GB, 1)
-        $label = "{0}  {1}  ({2} GB free)" -f $d.DeviceID, ($(if ($d.VolumeName) { $d.VolumeName } else { '(no label)' })), $freeGb
-        [void](& $g 'FastDrive').Items.Add($label)
-    }
-    if ((& $g 'FastDrive').Items.Count -eq 0) {
-        (& $g 'FastTransferStatus').Text = 'No drive detected on this PC.'
-        (& $g 'FastTransferStatus').Foreground = '#FFFFCA28'
-        return
-    }
-    (& $g 'FastTransferStatus').Text = ''
-    $preselect = 0
-    if ($currentDeviceId) {
-        for ($i = 0; $i -lt $drives.Count; $i++) { if ($drives[$i].DeviceID -eq $currentDeviceId) { $preselect = $i; break } }
-    }
-    (& $g 'FastDrive').SelectedIndex = $preselect
-}
-Update-FastDriveChoices
-(& $g 'BtnFastDriveRefresh').Add_Click({ Update-FastDriveChoices })
 
 (& $g 'BtnTestNet').Add_Click({
     $path = (& $g 'Net').Text.Trim()
@@ -304,6 +270,17 @@ function Select-WavFile {
 (& $g 'BtnSoundFinish').Add_Click({ $p = Select-WavFile -Title 'Select transfer-completed sound (.wav)'; if ($p) { (& $g 'SoundFinish').Text = $p } })
 (& $g 'BtnSoundError').Add_Click({ $p = Select-WavFile -Title 'Select transfer-error sound (.wav)'; if ($p) { (& $g 'SoundError').Text = $p } })
 
+(& $g 'BtnFastBrowse').Add_Click({
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Select the local folder for Fast Transfer Stage 1 copies'
+    $dlg.ShowNewFolderButton = $true
+    if ((& $g 'FastPath').Text) { $dlg.SelectedPath = (& $g 'FastPath').Text }
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        (& $g 'FastPath').Text = $dlg.SelectedPath
+        (& $g 'FastTransferStatus').Text = ''
+    }
+})
+
 (& $g 'BtnKiosk').Add_Click({
     $kioskBat = Join-Path $scriptRoot 'Start-Auto4950-Kiosk.bat'
     if (-not (Test-Path -LiteralPath $kioskBat)) {
@@ -355,15 +332,12 @@ function Select-WavFile {
     )
 
     $config.KioskFastTransferEnabled = [bool](& $g 'FastTransferEnabled').IsChecked
-    $fastSel = (& $g 'FastDrive').SelectedItem
-    if ($fastSel) {
-        $selectedDeviceId = $fastSel.ToString().Split(' ')[0]   # e.g. "D:"
-        $location = (& $g 'FastLocation').Text.Trim()
-        if (-not $location) { $location = $script:FastLocationDefault }
-        $config.KioskFastTransferPath = Join-Path $selectedDeviceId $location
+    $fastPath = (& $g 'FastPath').Text.Trim()
+    if ($fastPath) {
+        $config.KioskFastTransferPath = $fastPath
     } elseif ($config.KioskFastTransferEnabled) {
         # Enabled but nothing to copy to - don't silently save a broken setup.
-        (& $g 'FastTransferStatus').Text = 'Fast Transfer needs a local drive selected above - it has been left disabled.'
+        (& $g 'FastTransferStatus').Text = 'Fast Transfer needs a local folder selected above - it has been left disabled.'
         (& $g 'FastTransferStatus').Foreground = '#FFEF5350'
         $config.KioskFastTransferEnabled = $false
     }

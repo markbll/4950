@@ -486,11 +486,9 @@ Options panels with one giant card that fills the screen.
      app's Options panel (they're shared, not Kiosk-only), so setting them
      here is enough even if Kiosk Mode is the only thing ever run on this
      PC.
-   - **Fast Transfer** - tick **Enable Fast Transfer**, pick a local drive
-     from the dropdown (**Refresh** re-scans if you plug in or partition a
-     drive after opening Setup), and set a **location** (folder name/path
-     on that drive) for where Stage 1 copies land. See **Fast Transfer**
-     below for what this changes.
+   - **Fast Transfer** - tick **Enable Fast Transfer** and **Browse...** to
+     pick the exact local folder Stage 1 should copy into (standard Windows
+     folder browser). See **Fast Transfer** below for what this changes.
    Click **Save configuration** afterwards.
 
 ### Running a transfer
@@ -538,7 +536,7 @@ Otherwise:
    DRIVE..."**, with a live percentage and an estimated time remaining
    (e.g. "Copying from drive - 42% (about 2m remaining)"). This is a raw
    copy only - no hashing or compression yet - straight from the source
-   drive to `<the drive and location chosen in Setup>\<case name>`.
+   drive to `<the folder chosen in Setup>\<case name>`.
 2. **Stage 1 complete.** The card turns **teal** and reads **"DRIVE SAFE TO
    REMOVE"** - the source drive can now be disconnected.
 3. **Stage 2 - in the background.** Hashing, compression and the network
