@@ -1213,6 +1213,28 @@ function Get-A4950AvailableKioskDrives {
     return @(Get-A4950RemovableDrives | Where-Object { $_.DeviceID.ToUpperInvariant() -notin $blocked })
 }
 
+function Get-A4950LocalFixedDrives {
+    <#
+    .SYNOPSIS List local fixed drives (WMI DriveType 3) - candidates for Kiosk Mode's Fast Transfer staging area.
+    .DESCRIPTION
+        Used by Setup.ps1 to populate the "local drive for the fast copy"
+        picker: only local, fixed (non-removable, non-network) drives make
+        sense as a Stage 1 destination, since the whole point is a quick
+        local copy off the source drive. Returns Win32_LogicalDisk objects
+        (DeviceID, VolumeName, FreeSpace, Size). Fails closed (empty list)
+        if WMI is unavailable, same as Get-A4950RemovableDrives.
+    #>
+    [CmdletBinding()]
+    param()
+    try {
+        return @(Get-CimInstance Win32_LogicalDisk -ErrorAction Stop |
+            Where-Object { $_.DeviceID -and $_.DriveType -eq 3 } |
+            Sort-Object DeviceID)
+    } catch {
+        return @()
+    }
+}
+
 function Write-A4950Log {
     <#
     .SYNOPSIS Append a timestamped, levelled line to a log file.

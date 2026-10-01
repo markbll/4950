@@ -300,15 +300,17 @@ sounds the main app's Options panel uses (`SoundStartPath`,
 them too without needing to open the full app.
 
 **Fast Transfer:** also in the Kiosk Mode section, tick **Enable Fast
-Transfer** and **Browse...** to pick the exact local folder Stage 1 should
-copy into (any local folder — not limited to a whole drive). When enabled,
-a transfer runs in two stages instead of one:
+Transfer** and pick a **local drive** from the dropdown (**Refresh**
+re-scans if you plug in or partition a drive after opening Setup), plus a
+**location** (folder name/path on that drive, e.g. `Auto4950FastTransfer`)
+for where Stage 1 copies land. When enabled, a transfer runs in two stages
+instead of one:
 
 - **Stage 1** — a fast, raw copy (no hashing or compression) from the
-  source drive straight to `<chosen folder>\<case>`. The card shows a live
-  percentage and an estimated time remaining while it runs. Before Stage 1
-  starts, the free space at the chosen folder's drive is checked against
-  the source drive's size; if it wouldn't fit, Fast Transfer is skipped for
+  source drive straight to `<drive>\<location>\<case>`. The card shows a
+  live percentage and an estimated time remaining while it runs. Before
+  Stage 1 starts, the free space on the chosen drive is checked against the
+  source drive's size; if it wouldn't fit, Fast Transfer is skipped for
   that job **silently** (no prompt, no error) and the normal single-stage
   transfer runs instead, straight from the source drive.
 - Once Stage 1 finishes, the card turns **teal** and reads **"DRIVE SAFE TO
